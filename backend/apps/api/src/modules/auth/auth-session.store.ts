@@ -16,16 +16,16 @@ export interface RotateSessionInput {
 }
 
 export interface AuthSessionStorePort {
-  create(session: CachedAuthSession): void;
-  isActive(sessionId: string, userId: string): boolean;
-  rotate(input: RotateSessionInput): boolean;
-  revoke(sessionId: string, userId: string): void;
-  clear(): void;
-  /** DEBUG ONLY: trả về snapshot các session đang active (chưa hết hạn). */
-  list(): CachedAuthSession[];
+  create(session: CachedAuthSession): Promise<void>;
+  isActive(sessionId: string, userId: string): Promise<boolean>;
+  rotate(input: RotateSessionInput): Promise<boolean>;
+  revoke(sessionId: string, userId: string): Promise<void>;
 }
 
 /**
+ * Explicit in-process adapter for unit tests and isolated local use.
+ * Production application wiring uses RedisAuthSessionStore.
+ *
  * Process-local, bounded session cache.
  *
  * Only refresh-token hashes are kept in memory. Restarting the API clears all
@@ -40,7 +40,7 @@ export class MemoryAuthSessionStore implements AuthSessionStorePort {
     }
   }
 
-  create(session: CachedAuthSession): void {
+  async create(session: CachedAuthSession): Promise<void> {
     this.removeExpired();
     if (this.sessions.size >= this.maxSessions) {
       const oldestSessionId = this.sessions.keys().next().value as string | undefined;
@@ -49,12 +49,12 @@ export class MemoryAuthSessionStore implements AuthSessionStorePort {
     this.sessions.set(session.id, { ...session });
   }
 
-  isActive(sessionId: string, userId: string): boolean {
+  async isActive(sessionId: string, userId: string): Promise<boolean> {
     const session = this.getActive(sessionId, userId);
     return session !== undefined;
   }
 
-  rotate(input: RotateSessionInput): boolean {
+  async rotate(input: RotateSessionInput): Promise<boolean> {
     const session = this.getActive(input.sessionId, input.userId);
     if (!session) return false;
 
@@ -72,20 +72,9 @@ export class MemoryAuthSessionStore implements AuthSessionStorePort {
     return true;
   }
 
-  revoke(sessionId: string, userId: string): void {
+  async revoke(sessionId: string, userId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session?.userId === userId) this.sessions.delete(sessionId);
-  }
-
-  clear(): void {
-    this.sessions.clear();
-  }
-
-  list(): CachedAuthSession[] {
-    const now = Date.now();
-    return [...this.sessions.values()].filter(
-      (s) => s.expiresAt.getTime() > now,
-    );
   }
 
   private getActive(

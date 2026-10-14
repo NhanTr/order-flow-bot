@@ -14,9 +14,9 @@ docker compose up -d postgres
 npm.cmd run generate:prisma
 ```
 
-Docker Compose no longer provisions Redis. The optional notification worker still
-requires an external `REDIS_URL` together with `TELEGRAM_BOT_TOKEN` and
-`DATABASE_URL`; auth sessions themselves use the process-local memory cache.
+The root production Compose stack provisions Redis for authentication sessions,
+rate limiting, and the notification worker. When services run outside that stack,
+set `REDIS_URL` together with their other required environment variables.
 To retry a `FAILED` notification after correcting an operational problem:
 
 ```powershell
@@ -130,11 +130,11 @@ npm install
 npm run dev
 ```
 
-Authentication uses a process-local memory cache for sessions and the
-server-only variables shown in the repository `.env.example`. Only SHA-256
-refresh-token hashes are cached; restarting the API logs out every user, and
-multiple API instances do not share sessions. Use Redis before horizontally
-scaling the API.
+Authentication uses Redis-backed sessions and the server-only variables shown
+in the repository `.env.example`. Only SHA-256 refresh-token hashes are stored.
+Sessions are shared across API instances and survive an individual API restart.
+If Redis is unavailable, authenticated operations fail with HTTP 503; the API
+does not fall back to process memory.
 
 Apply `prisma/sql/2026-08-04_users_rls.sql` to prevent the `users` table and
 its password hashes from being read through Supabase's public Data API. The API

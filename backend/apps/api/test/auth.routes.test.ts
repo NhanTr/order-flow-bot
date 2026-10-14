@@ -123,6 +123,26 @@ test("admin auth routes reject invalid input and missing bearer token", async ()
   assert.equal(invalidCredentials.body.error.code, "INVALID_CREDENTIALS");
 });
 
+test("auth routes return a sanitized 503 when shared sessions are unavailable", async () => {
+  const authService = new FakeAuthService();
+  authService.loginAdmin = async () => {
+    throw new AppError(
+      "SERVICE_UNAVAILABLE",
+      "Authentication session service is unavailable",
+      { cause: new Error("redis://secret-user:secret-password@internal:6379") },
+    );
+  };
+  const response = await request(createApp({ authService }))
+    .post("/api/v1/admin/auth/login")
+    .send({ username: "owner", password: "correct-password" });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(Object.keys(response.body.error).sort(), ["code", "message", "requestId"]);
+  assert.equal(response.body.error.code, "SERVICE_UNAVAILABLE");
+  assert.equal(response.body.error.message, "Authentication session service is unavailable");
+  assert.doesNotMatch(JSON.stringify(response.body), /secret-password|internal:6379/);
+});
+
 test("debug session route is unavailable in every environment", async () => {
   const originalNodeEnv = process.env.NODE_ENV;
 

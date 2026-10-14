@@ -12,6 +12,9 @@ interface TokenPayload {
   tokenType: "access" | "refresh";
 }
 
+const JWT_ISSUER = "order-flow";
+const JWT_AUDIENCE = "order-flow-api";
+
 export class AuthTokenService {
   private readonly accessSecret: Uint8Array;
   private readonly refreshSecret: Uint8Array;
@@ -71,6 +74,8 @@ export class AuthTokenService {
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setSubject(payload.sub)
+      .setIssuer(JWT_ISSUER)
+      .setAudience(JWT_AUDIENCE)
       .setJti(randomUUID())
       .setIssuedAt()
       .setExpirationTime(`${expiresInSeconds}s`)
@@ -83,7 +88,11 @@ export class AuthTokenService {
     expectedType: TokenPayload["tokenType"],
   ): Promise<TokenPayload> {
     try {
-      const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
+      const { payload } = await jwtVerify(token, secret, {
+        algorithms: ["HS256"],
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
+      });
       const role = payload.role;
 
       if (

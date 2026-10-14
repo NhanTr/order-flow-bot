@@ -96,6 +96,13 @@ All module directories are under `backend/apps/api/src/modules/`:
 - The staff `Kiểm tra thanh toán` action actively queries SePay API v2 as a webhook-recovery path, requiring `SEPAY_API_TOKEN` and an environment-specific `SEPAY_API_BASE_URL`; Live and Test Mode/Sandbox tokens are isolated. Numeric API v1 and UUID API v2 transaction IDs share the same string idempotency column.
 - The experimental voice-order handler can download a Telegram voice message and invoke a configured Hermes-compatible command bridge; it is disabled unless `VOICE_ORDER_SCRIPT` is configured.
 
+## Progress log — 2026-10-14
+
+- Replaced process-local API authentication sessions with Redis TTL records and
+  atomic Lua refresh-token rotation. Sessions are shared across API instances;
+  Redis failures return 503 without an in-memory fallback. JWT verification now
+  requires HS256, issuer `order-flow`, and audience `order-flow-api`.
+
 ## Progress log — 2026-10-13
 
 - Added `seed:users` and a shared identity seed for one OWNER, one SERVICE_STAFF and one BARISTA on an empty database. All user-producing demo seeds reuse those accounts; old/unrelated users are not deleted.
@@ -137,7 +144,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 - Added a deterministic, rerunnable visualization seed that targets only the PostgreSQL database exposed by local Docker, covering menu, orders, order items, payments, status history and historical notifications across a configurable time range.
 - The visualization seed uses a dedicated localhost Docker PostgreSQL URL instead of the normal Supabase environment URL, never writes `users`, requires existing active SERVICE_STAFF and BARISTA records, and refuses production/remote database targets.
-- Removed the local Redis service from Docker Compose; auth session caching remains process-local, while the optional BullMQ notification worker requires an externally supplied Redis service if used.
+- The earlier local PostgreSQL-only Compose file omitted Redis; the root production Compose stack now supplies Redis for shared authentication sessions and the BullMQ notification worker.
 - Added a guarded, non-destructive users-only sync from Supabase into local Docker PostgreSQL; it preserves UUIDs and refuses unique identity conflicts.
 - Usage and verification queries are documented in `backend/docs/visualization-seed.md`.
 - Removed the local realtime Order Simulator and its dedicated API scripts; test data remains available through the Docker-only visualization seed.
@@ -167,7 +174,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 - `feat-tele` implements the internal Bot session against `public.users`, now exposed separately at `POST /api/v1/telegram/bot/session`, including internal-secret authentication, active-state enforcement, role mapping and Bot response validation.
 - Verified locally for KHOA-002: API auth checks and 11 tests pass; Bot type-check/build and 32 tests pass.
 
-- `apps/api` is a runnable Express service; the auth module implements admin JWT sessions and verified Telegram Web App sessions. Session state is held by a bounded process-local memory cache in `auth-session.store.ts`.
+- `apps/api` is a runnable Express service; the auth module implements admin JWT sessions and verified Telegram Web App sessions. Production session state is held in Redis with TTL and atomic refresh rotation; `MemoryAuthSessionStore` is an explicit test/local adapter.
 - Employee and menu modules are developed on dedicated feature branches; shared packages remain placeholders kept by `.gitkeep` files.
 - `schema.prisma` configures Prisma Client and PostgreSQL through pooled `DATABASE_URL` plus migration `DIRECT_URL`; it currently defines the initial `User`, `Order`, and `OrderItem` models and related enums.
 - `seed.ts` creates or refreshes the initial active `OWNER` from `SEED_OWNER_*`
@@ -198,7 +205,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 - Bruno API testing: open `backend/bruno/` as a collection; read `backend/bruno/README.md` for authentication and Telegram flows.
 - Postman/API generation: import `backend/docs/openapi.yaml`; keep it synchronized with route behavior and `api-contract.md`.
 - Swift mobile work: start at `SWIFT_MOBILE_APP_SPEC.md`; the MVP is an OWNER-only, read-only manager dashboard and explicitly excludes service-staff/Barista actions.
-- Auth session storage: use `backend/apps/api/src/modules/auth/auth-session.store.ts`; restart clears sessions and multi-instance deployments require a shared replacement such as Redis.
+- Auth session storage: use `backend/apps/api/src/modules/auth/auth-session.store.ts` for the asynchronous port and `redis-auth-session.store.ts` for production. Redis sessions survive individual API restarts and are shared across instances.
 - Telegram authentication: Web App JWT flow is registered in `backend/apps/api/src/modules/auth/auth.routes.ts`; internal Bot employee resolution is implemented in `telegram-session.routes.ts` and mounted at `/api/v1/telegram/bot/session` from `apps/api/src/app.ts`.
 - Environment variable names/templates: use the root `.env.example`; never commit `.env.local`.
 - New-contributor local setup: use root `INSTALLATION.md` for Docker PostgreSQL/Redis, seed, app and Bruno steps.
