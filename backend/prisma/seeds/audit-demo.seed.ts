@@ -1,23 +1,10 @@
-import { PrismaClient, AuditEntityType, UserRole, UserStatus } from "@prisma/client";
+import { seedSharedUsers } from "./shared-users.seed";
+import { PrismaClient, AuditEntityType } from "@prisma/client";
 
 export async function seedAuditDemo(prisma: PrismaClient) {
   console.log("Starting audit logs seed...");
 
-  let owner = await prisma.user.findFirst({
-    where: { role: UserRole.OWNER, status: UserStatus.ACTIVE },
-  });
-
-  if (!owner) {
-    owner = await prisma.user.create({
-      data: {
-        fullName: "Quản lý Cửa Hàng",
-        username: "demo_owner",
-        passwordHash: "demo-hash",
-        role: UserRole.OWNER,
-        status: UserStatus.ACTIVE,
-      },
-    });
-  }
+  const { owner } = await seedSharedUsers(prisma);
 
   const logsToSeed = [
     {

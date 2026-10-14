@@ -1,7 +1,10 @@
 import { Router } from "express";
 
 import type { AuthServicePort } from "../modules/auth/auth.service.js";
-import { requireAdminAccess } from "../modules/auth/auth.middleware.js";
+import {
+  requireAdminAccess,
+  requireAdminAuth,
+} from "../modules/auth/auth.middleware.js";
 import { createAuthRouter } from "../modules/auth/auth.routes.js";
 import { createEmployeeRouter } from "../modules/employees/employee.routes.js";
 import type { EmployeeServicePort } from "../modules/employees/employee.service.js";
@@ -62,7 +65,7 @@ export function createApiRouter(
     // (admin FE) — the Telegram Bot reaches /orders via the internal-secret-gated
     // telegram router, so requiring an admin token here does not affect the Bot.
     router.use("/orders", requireAdminAccess(authService), createOrderRouter());
-    router.use("/barista", requireAdminAccess(authService), createBaristaRouter());
+    router.use("/barista", requireAdminAuth(authService), createBaristaRouter());
     router.use("/admin", createAdminRouter(authService));
   }
 

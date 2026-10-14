@@ -1,0 +1,41 @@
+meta {
+  name: initQrPayment
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/payments/qr
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "requestedByUserId": "{{userId}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = data.qr?.paymentCode ?? data.payment?.paymentCode;
+    if (value) bru.setVar("paymentCode", value);
+  }
+}
+
+docs {
+  Initialize or reuse a pending QR payment
+
+  Source: backend/docs/openapi.yaml
+
+}

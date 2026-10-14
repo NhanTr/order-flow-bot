@@ -1,0 +1,32 @@
+meta {
+  name: updateMenuCategory
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/admin/menu-categories/{{categoryId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Updated Bruno Test Category"
+  }
+}
+
+docs {
+  Partially update a menu category
+
+  Source: backend/docs/openapi.yaml
+
+}

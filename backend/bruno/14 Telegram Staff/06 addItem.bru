@@ -1,0 +1,38 @@
+meta {
+  name: addItem
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/items
+  body: json
+  auth: none
+}
+
+headers {
+  x-bot-internal-secret: {{botInternalSecret}}
+  x-telegram-user-id: {{staffTelegramUserId}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "menuItemId": "{{menuItemId}}",
+    "quantity": 1,
+    "note": "Bruno test"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = (data.order ?? data).items?.slice(-1)[0]?.id;
+    if (value) bru.setVar("orderItemId", value);
+  }
+}
+
+docs {
+  Internal Telegram API. Requires an ACTIVE employee with the corresponding role and matching BOT_INTERNAL_SECRET.
+}

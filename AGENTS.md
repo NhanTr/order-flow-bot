@@ -11,6 +11,7 @@ order-flow/
 ├── AGENTS.md                         # This persistent project map
 ├── compose.yaml                      # Pull-and-run production container stack
 ├── DOCKER_DEPLOYMENT.md              # Container publishing and operator guide
+├── INSTALLATION.md                   # GitHub clone-to-running local installation guide
 ├── package.json                      # Root process runner (`npm run live`)
 ├── SWIFT_MOBILE_APP_SPEC.md          # OWNER-only, read-only Swift manager dashboard contract
 ├── frontend/                         # Next.js Admin Web Application
@@ -24,6 +25,7 @@ order-flow/
     ├── docker-compose.yml            # Local PostgreSQL 16 service
     ├── Dockerfile                    # Shared API/Bot/worker/init production image
     ├── Dockerfile.postgres           # PostgreSQL image with baseline schema
+    ├── bruno/                        # Native Bruno collection, Local environment and API testing guide
     ├── docs/
     │   ├── api-contract.md           # Planned HTTP route inventory
     │   └── openapi.yaml              # Importable Postman/OpenAPI contract for all routes
@@ -51,7 +53,8 @@ order-flow/
     │   └── eslint-config/             # Shared ESLint configuration
     └── prisma/
         ├── schema.prisma              # PostgreSQL Prisma schema
-        ├── seed.ts                    # Idempotent initial OWNER seed entry point
+        ├── seed.ts                    # OWNER initialization and shared three-role demo seeds
+        ├── seeds/shared-users.seed.ts # Shared OWNER/staff/barista identities; env-only bcrypt password
         ├── seed-visualization.ts      # Large local-Docker dataset; reuses existing users
         └── sync-users-to-docker.ts    # Safe Supabase users → local Docker upsert
 ```
@@ -92,6 +95,11 @@ All module directories are under `backend/apps/api/src/modules/`:
 - Telegram development commands run through `apps/telegram-bot/src/dev-runner.ts`, which deliberately lets the local `.env` override stale shell credentials; production commands continue to use deployment-provided environment variables.
 - The staff `Kiểm tra thanh toán` action actively queries SePay API v2 as a webhook-recovery path, requiring `SEPAY_API_TOKEN` and an environment-specific `SEPAY_API_BASE_URL`; Live and Test Mode/Sandbox tokens are isolated. Numeric API v1 and UUID API v2 transaction IDs share the same string idempotency column.
 - The experimental voice-order handler can download a Telegram voice message and invoke a configured Hermes-compatible command bridge; it is disabled unless `VOICE_ORDER_SCRIPT` is configured.
+
+## Progress log — 2026-10-13
+
+- Added `seed:users` and a shared identity seed for one OWNER, one SERVICE_STAFF and one BARISTA on an empty database. All user-producing demo seeds reuse those accounts; old/unrelated users are not deleted.
+- Removed fixed demo passwords and the extra inactive staff fixture. OWNER passwords require at least 12 characters from environment configuration; seed results/logs exclude password/hash and CLI errors are sanitized. Bruno credentials use Secret variables.
 
 ## Progress log — 2026-08-16
 
@@ -179,6 +187,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 ## Navigation shortcuts
 
+- Security hardening planning: start at `docs/superpowers/plans/2026-10-13-security-hardening.md`; the shared specification and seven agent packets define permissions, ownership, dependencies and acceptance checks. These are plans, not completed security fixes.
 - API work: start at `backend/apps/api/src/` and the relevant `modules/<domain>/` folder.
 - Telegram work: start at `backend/apps/telegram-bot/src/`.
 - Telegram callback protocol and replay guards: start at `backend/apps/telegram-bot/src/callbacks/`.
@@ -187,11 +196,13 @@ All module directories are under `backend/apps/api/src/modules/`:
 - Cross-application contracts/constants: use `backend/packages/shared-types/` and `backend/packages/shared-constants/`.
 - Local database infrastructure: use `backend/docker-compose.yml`.
 - Planned API routes: read `backend/docs/api-contract.md` before implementing handlers.
+- Bruno API testing: open `backend/bruno/` as a collection; read `backend/bruno/README.md` for authentication and Telegram flows.
 - Postman/API generation: import `backend/docs/openapi.yaml`; keep it synchronized with route behavior and `api-contract.md`.
 - Swift mobile work: start at `SWIFT_MOBILE_APP_SPEC.md`; the MVP is an OWNER-only, read-only manager dashboard and explicitly excludes service-staff/Barista actions.
 - Auth session storage: use `backend/apps/api/src/modules/auth/auth-session.store.ts`; restart clears sessions and multi-instance deployments require a shared replacement such as Redis.
 - Telegram authentication: Web App JWT flow is registered in `backend/apps/api/src/modules/auth/auth.routes.ts`; internal Bot employee resolution is implemented in `telegram-session.routes.ts` and mounted at `/api/v1/telegram/bot/session` from `apps/api/src/app.ts`.
 - Environment variable names/templates: use the root `.env.example`; never commit `.env.local`.
+- New-contributor local setup: use root `INSTALLATION.md` for Docker PostgreSQL/Redis, seed, app and Bruno steps.
 
 ## Installed GitHub skills
 

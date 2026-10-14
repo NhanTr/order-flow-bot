@@ -1,0 +1,33 @@
+meta {
+  name: updateOrderItem
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/items/{{orderItemId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "quantity": 2,
+    "note": "Updated in Bruno"
+  }
+}
+
+docs {
+  Update an order item
+
+  Source: backend/docs/openapi.yaml
+
+}

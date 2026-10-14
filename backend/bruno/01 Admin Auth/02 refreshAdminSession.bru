@@ -1,0 +1,37 @@
+meta {
+  name: refreshAdminSession
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/auth/refresh
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "refreshToken": "{{refreshToken}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const data = res.getBody().data;
+    if (data?.accessToken) bru.setVar("accessToken", data.accessToken);
+    if (data?.refreshToken) bru.setVar("refreshToken", data.refreshToken);
+    if (data?.user?.id) bru.setVar("userId", data.user.id);
+  }
+}
+
+docs {
+  Rotate a refresh token and issue a new token pair
+
+  Source: backend/docs/openapi.yaml
+
+}

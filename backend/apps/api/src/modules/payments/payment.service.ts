@@ -1,5 +1,5 @@
 import createHttpError from "http-errors";
-import { AuditEntityType, Prisma } from "@prisma/client";
+import { AuditEntityType, Prisma, PrismaClient } from "@prisma/client";
 import {
   FulfillmentStatus,
   OrderStatusDomain,
@@ -10,14 +10,16 @@ import {
 import { PaymentRepository } from "./payment.repository";
 import { generatePaymentCode } from "../orders/order-code";
 import { prisma } from "../../db";
+import type { AccessIdentity } from "../auth/auth.types";
+import { assertOrderAccess } from "../auth/order-access.policy";
 
 export interface ConfirmCashInput {
-  confirmedByUserId: string;
+  confirmedByUserId?: string;
   amount?: number;
 }
 
 export interface InitQrPaymentInput {
-  requestedByUserId: string;
+  requestedByUserId?: string;
 }
 
 export interface InitQrPaymentResult {
@@ -27,37 +29,39 @@ export interface InitQrPaymentResult {
 }
 
 export class PaymentService {
-  constructor(private readonly paymentRepository: PaymentRepository) {}
+  constructor(
+    private readonly paymentRepository: PaymentRepository,
+    private readonly database: PrismaClient = prisma,
+  ) {}
 
-  public async listOrderPayments(orderId: string): Promise<Payment[]> {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+  public async listOrderPayments(
+    orderId: string,
+    actor: AccessIdentity,
+  ): Promise<Payment[]> {
+    const order = await this.database.order.findUnique({ where: { id: orderId } });
     if (!order) throw createHttpError(404, `Order ${orderId} not found`);
+    assertOrderAccess(actor, order, "read");
 
     return this.paymentRepository.findManyByOrderId(orderId);
   }
 
-  public async confirmCash(orderId: string, input: ConfirmCashInput): Promise<Payment> {
-    const confirmedByUserId = input.confirmedByUserId;
+  public async confirmCash(
+    orderId: string,
+    input: ConfirmCashInput,
+    actor: AccessIdentity,
+  ): Promise<Payment> {
+    const confirmedByUserId = actor.userId;
 
-    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const [order, actor] = await Promise.all([
-        tx.order.findUnique({
-          where: { id: orderId },
-          include: { payment: true },
-        }),
-        tx.user.findUnique({ where: { id: confirmedByUserId } }),
-      ]);
+    return this.runSerializable(async (tx, attempt) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { payment: true },
+      });
 
       if (!order) throw createHttpError(404, `Order ${orderId} not found`);
-      if (!actor) throw createHttpError(404, `User ${confirmedByUserId} not found`);
+      assertOrderAccess(actor, order, "pay");
       if (!order.payment) {
         throw createHttpError(409, `Payment record for order ${orderId} has not been created`);
-      }
-
-      const isCreator = order.createdByUserId === confirmedByUserId;
-      const isManager = actor.role === "OWNER";
-      if (!isCreator && !isManager) {
-        throw createHttpError(403, "Only the order creator or owner can confirm cash payment");
       }
 
       if (order.paymentStatus !== PaymentStatus.UNPAID) {
@@ -79,7 +83,12 @@ export class PaymentService {
         input.amount === undefined ? order.totalAmount : BigInt(input.amount);
 
       if (receivedAmount !== order.totalAmount) {
-        throw createHttpError(400, "Cash amount must match the order total amount");
+        throw createHttpError(
+          attempt > 0 ? 409 : 400,
+          attempt > 0
+            ? "Order total changed while cash confirmation was in progress"
+            : "Cash amount must match the order total amount",
+        );
       }
 
       const paymentUpdate = await tx.payment.updateMany({
@@ -166,27 +175,19 @@ export class PaymentService {
 
   public async initQrPayment(
     orderId: string,
-    input: InitQrPaymentInput
+    _input: InitQrPaymentInput,
+    actor: AccessIdentity,
   ): Promise<InitQrPaymentResult> {
-    const requestedByUserId = input.requestedByUserId;
+    const requestedByUserId = actor.userId;
 
-    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const [order, actor] = await Promise.all([
-        tx.order.findUnique({
-          where: { id: orderId },
-          include: { payment: true },
-        }),
-        tx.user.findUnique({ where: { id: requestedByUserId } }),
-      ]);
+    return this.runSerializable(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { payment: true },
+      });
 
       if (!order) throw createHttpError(404, `Order ${orderId} not found`);
-      if (!actor) throw createHttpError(404, `User ${requestedByUserId} not found`);
-
-      const isCreator = order.createdByUserId === requestedByUserId;
-      const isManager = actor.role === "OWNER";
-      if (!isCreator && !isManager) {
-        throw createHttpError(403, "Only the order creator or owner can initialize QR payment");
-      }
+      assertOrderAccess(actor, order, "pay");
 
       if (order.paymentStatus === PaymentStatus.PENDING && order.paymentMethod === PaymentMethod.QR) {
         if (!order.payment) {
@@ -283,6 +284,33 @@ export class PaymentService {
         amount: payment.expectedAmount,
       };
     });
+  }
+
+  private async runSerializable<T>(
+    operation: (tx: Prisma.TransactionClient, attempt: number) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.database.$transaction(
+          (tx) => operation(tx, attempt),
+          {
+            isolationLevel: "Serializable",
+            maxWait: 5_000,
+            timeout: 10_000,
+          },
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2034" && attempt < 2) {
+          continue;
+        }
+        if ((error as { code?: string }).code === "P2034") {
+          throw createHttpError(409, "Payment operation conflicted with another request; retry with fresh state");
+        }
+        throw error;
+      }
+    }
+
+    throw createHttpError(409, "Payment operation conflicted with another request; retry with fresh state");
   }
 
   private buildQrTransferContent(orderCode: string, paymentCode?: string | null): string {

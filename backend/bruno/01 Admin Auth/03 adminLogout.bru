@@ -1,0 +1,30 @@
+meta {
+  name: adminLogout
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/auth/logout
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  if (res.getStatus() === 204) {
+    bru.setVar("accessToken", "");
+    bru.setVar("refreshToken", "");
+    bru.setVar("userId", "");
+  }
+}
+
+docs {
+  Revoke the current in-memory session
+
+  Source: backend/docs/openapi.yaml
+
+}

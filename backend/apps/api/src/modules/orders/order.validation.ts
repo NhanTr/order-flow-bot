@@ -15,10 +15,6 @@ export function validateCreateOrder(data: any): ValidationResult {
     return { isValid: false, errors: ["Request body is required"] };
   }
 
-  if (!data.createdByUserId || typeof data.createdByUserId !== "string") {
-    errors.push("createdByUserId is required");
-  }
-
   if (
     data.paymentMethod !== undefined &&
     !Object.values(PaymentMethod).includes(data.paymentMethod)
@@ -118,6 +114,22 @@ export function validateCancelOrder(data: any): ValidationResult {
   }
 
   return { isValid: errors.length === 0, errors };
+}
+
+export function validateReadyOrder(data: any): ValidationResult {
+  if (typeof data?.reason !== "string" || data.reason.trim() === "") {
+    return { isValid: false, errors: ["reason is required for an owner READY override"] };
+  }
+
+  return { isValid: true, errors: [] };
+}
+
+export function validateDeliverOrder(data: any): ValidationResult {
+  if (data?.reason !== undefined && typeof data.reason !== "string") {
+    return { isValid: false, errors: ["reason must be a string when provided"] };
+  }
+
+  return { isValid: true, errors: [] };
 }
 
 /**

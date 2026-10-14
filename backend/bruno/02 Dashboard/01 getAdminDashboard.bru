@@ -1,0 +1,22 @@
+meta {
+  name: getAdminDashboard
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/dashboard?days=30
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get live owner dashboard data
+
+  Source: backend/docs/openapi.yaml
+  Returns PostgreSQL aggregates using Asia/Ho_Chi_Minh revenue buckets. Requires an active OWNER JWT.
+}

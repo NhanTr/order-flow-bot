@@ -1,0 +1,22 @@
+meta {
+  name: getRevenueReport
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/reports/revenue
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get revenue totals by date range and method
+
+  Source: backend/docs/openapi.yaml
+
+}

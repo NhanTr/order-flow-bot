@@ -1,0 +1,22 @@
+meta {
+  name: getOrder
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get order detail with timeline
+
+  Source: backend/docs/openapi.yaml
+
+}

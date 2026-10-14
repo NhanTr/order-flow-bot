@@ -1,0 +1,32 @@
+meta {
+  name: exportRevenueReport
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/reports/revenue/export
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "format": "xlsx"
+  }
+}
+
+docs {
+  Export accounting XLSX or template-based TNDN DOCX
+
+  Source: backend/docs/openapi.yaml
+  The XLSX includes related orders, Payments, SePay transactions, refunds, formula-driven accounting tie-outs and color-coded annotated exceptions. DOCX formats retain the supplied 03/04-TNDN templates.
+}

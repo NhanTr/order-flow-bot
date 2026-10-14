@@ -1,0 +1,22 @@
+meta {
+  name: listAdminMenuCategories
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/menu-categories
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List all menu categories
+
+  Source: backend/docs/openapi.yaml
+
+}

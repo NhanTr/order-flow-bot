@@ -1,0 +1,33 @@
+meta {
+  name: cancelOrder
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/cancel
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "reason": "Cancel Bruno test order",
+    "requesterId": "{{userId}}"
+  }
+}
+
+docs {
+  Cancel an unpaid order
+
+  Source: backend/docs/openapi.yaml
+
+}

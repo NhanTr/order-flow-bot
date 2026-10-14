@@ -1,0 +1,44 @@
+meta {
+  name: createMenuItem
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/menu-items
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "categoryId": "{{categoryId}}",
+    "name": "Bruno Coffee",
+    "price": 30000,
+    "isAvailable": true
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = data.id;
+    if (value) bru.setVar("menuItemId", value);
+  }
+}
+
+docs {
+  Create a menu item
+
+  Source: backend/docs/openapi.yaml
+
+}

@@ -87,14 +87,16 @@ Status: **implemented**
 | `POST` | `/api/v1/orders/:orderId/ready` | Mark a preparing order ready |
 | `POST` | `/api/v1/orders/:orderId/deliver` | Mark a ready order delivered |
 
-- Create body: `{ "createdByUserId": "...", "paymentMethod": "QR|CASH", "customerNote": "...", "items": [{ "menuItemId": "...", "quantity": 1, "note": "..." }] }`.
+- Web orders require an authenticated OWNER or SERVICE_STAFF. OWNER may access all orders; staff may access only their own. Known forbidden orders return 403, unknown orders 404. BARISTA uses the Telegram flow.
+- All acting identities are derived from the verified session. Legacy body actor IDs are accepted but ignored for one compatibility release; omit them from new clients.
+- Create body: `{ "paymentMethod": "QR|CASH", "customerNote": "...", "items": [{ "menuItemId": "...", "quantity": 1, "note": "..." }] }`. The creator is always the authenticated user.
 - New orders start with `paymentStatus: "UNPAID"` and `fulfillmentStatus: "PENDING_PAYMENT"` from database defaults.
 - `orderCode` is unique in the database; create retries generated code collisions before surfacing a database error.
-- `GET /orders` supports `createdByUserId`, `fulfillmentStatus`, `paymentStatus`, `assignedBaristaId`, `page`, and `limit`; service staff can pass their own `createdByUserId` to list their own service orders.
+- `GET /orders` supports `createdByUserId`, `fulfillmentStatus`, `paymentStatus`, `assignedBaristaId`, `page`, and `limit`; staff lists are server-scoped to the authenticated user regardless of the supplied creator filter.
 - `GET /orders/:orderId` returns `items` and `timeline`, where `timeline` is status history ordered oldest-first.
-- Cancel body: `{ "reason": "...", "requesterId": "..." }`. Unpaid pending-payment orders can be cancelled and the cancellation is recorded in `timeline`.
-- READY body: `{ "requesterId": "..." }`, or `baristaId`/`userId`. Only the assigned barista or a manager can mark READY.
-- DELIVER body: `{ "requesterId": "..." }`, or `baristaId`/`userId`. Only the creator or a manager can mark DELIVERED.
+- Cancel body: `{ "reason": "..." }`. Cancellation is recorded in `timeline` with the authenticated actor.
+- Web READY body: `{ "reason": "..." }`. Requires OWNER and a non-empty string reason. Assigned baristas use Telegram.
+- DELIVER body: `{ "reason": "..." }` or `{}`. Staff may deliver their own READY order; OWNER must supply a reason when delivering another creator's order. Non-string reasons return 400.
 
 ## Order items
 
@@ -123,7 +125,7 @@ Status: **implemented**
 
 - `GET /orders/:orderId/payments` returns the linked payment history for the order.
 - QR initialization is idempotent for an existing pending QR payment and returns the transfer content and amount.
-- CASH confirmation requires `confirmedByUserId` and an exact amount when provided; only the order creator or owner can confirm.
+- Payment reads, CASH confirmation and QR initialization require OWNER or the staff order creator. CASH body is `{ "amount": 50000 }` or `{}`; the amount must be exact when supplied. QR body is `{}`. Attribution comes from the authenticated session.
 - CASH confirmation transitions the order from `UNPAID/PENDING_PAYMENT` to `PAID/QUEUED` and records payment + fulfillment history.
 - CASH confirmation and QR initialization write financial audit logs.
 
@@ -145,7 +147,7 @@ Status: **implemented**
 - Duplicate SePay webhooks are idempotent and still return HTTP success without reprocessing payments, notifications, or audit logs.
 - Exact QR matches transition the payment to `PAID`, queue the order, write payment history, and enqueue `ORDER_PAID`.
 - Underpaid, overpaid, wrong-code, and cancelled-order arrivals move the payment/order into review where applicable and enqueue `PAYMENT_REVIEW`.
-- Reconciliation resolution requires an owner actor and writes a financial audit log with the resolution action and note.
+- All admin transaction/reconciliation routes require OWNER. Resolution accepts `resolutionAction` and `resolutionNote`, derives the actor from the session, and writes a financial audit log.
 
 ## Refunds, revenue, and audit
 
@@ -158,7 +160,8 @@ Status: **implemented**
 | `POST` | `/api/v1/admin/reports/revenue/export` | Export the selected range as an accounting XLSX or a template-based 03/04-TNDN DOCX |
 | `GET` | `/api/v1/admin/audit-logs` | List audit logs |
 
-- Refund body: `{ "refundedByUserId": "...", "reason": "...", "amount": 50000 }`; `amount` is optional and defaults to the received payment amount.
+- All admin order, refund, revenue/export, audit and status-override routes require OWNER. Staff order access is available through `/api/v1/orders`.
+- Refund body: `{ "reason": "...", "amount": 50000 }`; `amount` is optional and defaults to the received payment amount. The actor comes from the session.
 - Refunds require an owner actor, reject duplicate refund records for the same payment, and write `MANUAL_REFUND_RECORDED` audit logs.
 - Revenue accepts `from` and `to` query parameters as ISO date-time strings or `YYYY-MM-DD`; date-only values are expanded to the Asia/Bangkok day boundary.
 - Revenue separates `CASH`, `QR`, and `REFUNDED`; refunded amounts are excluded from net revenue.
@@ -177,6 +180,7 @@ Status: **implemented**
 | `GET` | `/api/v1/barista/orders?baristaId=...` | List preparing or ready orders assigned to a barista |
 | `POST` | `/api/v1/orders/:orderId/claim` | Atomically claim a queued order |
 
+- Web barista read routes and assignment require OWNER. Claim body supplies `baristaId` only as the assignee; history records the authenticated OWNER as actor. Telegram barista operations retain their separate authentication.
 - Queue only shows orders with `fulfillmentStatus = QUEUED` and `paymentStatus = PAID`.
 - Claim is atomic at the database layer: only one barista can win a concurrent claim.
 - Claim rejects a target user unless their current role is `BARISTA` and status is `ACTIVE`.

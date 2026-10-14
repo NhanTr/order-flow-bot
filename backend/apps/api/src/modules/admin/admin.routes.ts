@@ -1,9 +1,6 @@
 import { Router } from "express";
 import type { AuthServicePort } from "../auth/auth.service.js";
-import {
-  requireAdminAccess,
-  requireAdminAuth,
-} from "../auth/auth.middleware.js";
+import { requireAdminAuth } from "../auth/auth.middleware.js";
 import { AdminController } from "./admin.controller";
 import { AdminService } from "./admin.service";
 import { AdminOrderRepository } from "./admin.repository";
@@ -61,7 +58,7 @@ export function createAdminRouter(
     requireAdminAuth(authService),
     dashboardController.getDashboard,
   );
-  router.use(requireAdminAccess(authService));
+  router.use(requireAdminAuth(authService));
 
   router.get("/orders",                           controller.listOrders);
   router.get("/orders/:orderId",                  controller.getOrder);

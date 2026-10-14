@@ -1,0 +1,20 @@
+meta {
+  name: queue
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/barista/queue
+  body: none
+  auth: none
+}
+
+headers {
+  x-bot-internal-secret: {{botInternalSecret}}
+  x-telegram-user-id: {{baristaTelegramUserId}}
+}
+
+docs {
+  Internal Telegram API. Requires an ACTIVE employee with the corresponding role and matching BOT_INTERNAL_SECRET.
+}

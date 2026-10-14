@@ -1,0 +1,38 @@
+meta {
+  name: handleSepayWebhook
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/webhooks/sepay
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Apikey {{sepayWebhookApiKey}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "id": "{{sepayTransactionId}}",
+    "transferAmount": "{{amount}}",
+    "transferType": "in",
+    "content": "{{paymentCode}}",
+    "code": "{{paymentCode}}",
+    "transactionDate": "{{transactionDate}}"
+  }
+}
+
+script:pre-request {
+  bru.setVar("transactionDate", new Date().toISOString());
+}
+
+docs {
+  Receive and reconcile a SePay transaction webhook
+
+  Source: backend/docs/openapi.yaml
+
+}

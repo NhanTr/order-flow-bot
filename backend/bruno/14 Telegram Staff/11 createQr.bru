@@ -1,0 +1,29 @@
+meta {
+  name: createQr
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/payments/qr
+  body: none
+  auth: none
+}
+
+headers {
+  x-bot-internal-secret: {{botInternalSecret}}
+  x-telegram-user-id: {{staffTelegramUserId}}
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = data.paymentCode ?? data.qr?.paymentCode ?? data.payment?.paymentCode;
+    if (value) bru.setVar("paymentCode", value);
+  }
+}
+
+docs {
+  Internal Telegram API. Requires an ACTIVE employee with the corresponding role and matching BOT_INTERNAL_SECRET.
+}

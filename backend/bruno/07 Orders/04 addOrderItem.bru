@@ -1,0 +1,43 @@
+meta {
+  name: addOrderItem
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/items
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "menuItemId": "{{menuItemId}}",
+    "quantity": 1,
+    "note": "Bruno test"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = (data.order ?? data).items?.slice(-1)[0]?.id;
+    if (value) bru.setVar("orderItemId", value);
+  }
+}
+
+docs {
+  Add an item using the current backend price snapshot
+
+  Source: backend/docs/openapi.yaml
+
+}

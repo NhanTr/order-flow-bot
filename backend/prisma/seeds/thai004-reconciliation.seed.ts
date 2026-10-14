@@ -1,13 +1,10 @@
+import { seedSharedUsers } from "./shared-users.seed";
 import {
   FulfillmentStatus,
   PaymentMethod,
   PaymentStatus,
   PrismaClient,
-  UserRole,
-  UserStatus,
 } from "@prisma/client";
-
-const STAFF_TELEGRAM_ID = BigInt(91004001);
 
 const ORDERS = [
   {
@@ -46,39 +43,7 @@ const ORDERS = [
 ];
 
 export async function seedThai004Reconciliation(prisma: PrismaClient) {
-  const owner = await prisma.user.upsert({
-    where: { username: "thai004_owner" },
-    update: {
-      fullName: "THAI004 Owner",
-      passwordHash: "thai004-dev-password-hash",
-      role: UserRole.OWNER,
-      status: UserStatus.ACTIVE,
-    },
-    create: {
-      fullName: "THAI004 Owner",
-      username: "thai004_owner",
-      passwordHash: "thai004-dev-password-hash",
-      role: UserRole.OWNER,
-      status: UserStatus.ACTIVE,
-    },
-  });
-
-  const serviceStaff = await prisma.user.upsert({
-    where: { telegramUserId: STAFF_TELEGRAM_ID },
-    update: {
-      fullName: "THAI004 Service Staff",
-      telegramChatId: STAFF_TELEGRAM_ID,
-      role: UserRole.SERVICE_STAFF,
-      status: UserStatus.ACTIVE,
-    },
-    create: {
-      fullName: "THAI004 Service Staff",
-      telegramUserId: STAFF_TELEGRAM_ID,
-      telegramChatId: STAFF_TELEGRAM_ID,
-      role: UserRole.SERVICE_STAFF,
-      status: UserStatus.ACTIVE,
-    },
-  });
+  const { owner, serviceStaff } = await seedSharedUsers(prisma);
 
   const category = await prisma.menuCategory.upsert({
     where: { name: "THAI004 Reconciliation Drinks" },

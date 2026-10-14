@@ -164,6 +164,28 @@ The seed is idempotent for an existing `OWNER`: it refreshes the configured
 name, bcrypt password hash, and active status. It refuses to promote an
 existing non-owner account that happens to use the same username.
 
+## Shared local/demo users
+
+Set `SEED_OWNER_PASSWORD` to at least 12 characters in `.env.local`, point
+`DATABASE_URL` to your local Docker database, and run from the repository root:
+
+```bash
+npm --prefix backend run seed:users
+```
+
+This seeds one `OWNER` (`SEED_OWNER_USERNAME`, default `owner`), one
+`SERVICE_STAFF` (`service_staff`) and one `BARISTA` (`barista`). Every BE004,
+THAI, reconciliation and audit demo seed reuses these accounts. On an empty
+database there are exactly three users; reruns preserve their IDs. Existing
+old or unrelated accounts are not removed. `db:seed` stays OWNER-only.
+
+OWNER passwords come only from environment configuration and are bcrypt-hashed.
+Staff/barista use Telegram with no password. Passwords and hashes are excluded
+from seed results/logs, and CLI errors are sanitized. Telegram IDs default to
+94004001/94004002/94004003 for demo seeds; override them with
+`SEED_OWNER_TELEGRAM_USER_ID`, `SEED_SERVICE_STAFF_TELEGRAM_USER_ID`, and
+`SEED_BARISTA_TELEGRAM_USER_ID` for your actual Telegram accounts.
+
 ## Local visualization seed
 
 For a large, reproducible dashboard/reporting dataset in the local Docker

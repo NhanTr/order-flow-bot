@@ -1,5 +1,8 @@
 # Order Flow
 
+> Cài đặt từ source với PostgreSQL/Redis bằng Docker: xem
+> [INSTALLATION.md](INSTALLATION.md).
+
 Order Flow là hệ thống vận hành F&B gồm bốn tiến trình:
 
 - Admin Web: Next.js, mặc định `http://localhost:3000`

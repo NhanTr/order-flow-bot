@@ -28,6 +28,7 @@
     "check:bot": "tsc --noEmit --project apps/telegram-bot/tsconfig.json",
     "test:bot": "vitest run --config apps/telegram-bot/vitest.config.ts",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "seed:users": "tsx prisma/seed.ts users",
     "seed:be004": "tsx prisma/seed.ts be004",
     "seed:menu": "tsx --env-file=../.env.local prisma/seed.ts menu",
     "seed:thai": "tsx prisma/seed.ts thai",

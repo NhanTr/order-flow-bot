@@ -1,0 +1,18 @@
+meta {
+  name: listPublicMenuItems
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/menu/items
+  body: none
+  auth: none
+}
+
+docs {
+  List available public menu items
+
+  Source: backend/docs/openapi.yaml
+
+}

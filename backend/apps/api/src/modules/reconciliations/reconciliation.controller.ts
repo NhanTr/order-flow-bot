@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import { requireOwnerActor } from "../auth/auth.middleware";
 import { ReconciliationService } from "./reconciliation.service";
 import { validateResolveReconciliation } from "./reconciliation.validation";
 
@@ -54,14 +55,19 @@ export class ReconciliationController {
     next: NextFunction
   ) => {
     try {
-      const v = validateResolveReconciliation(req.body);
+      const actor = requireOwnerActor(req);
+      const input = {
+        ...req.body,
+        resolvedByUserId: actor.userId,
+      };
+      const v = validateResolveReconciliation(input);
       if (!v.isValid) {
         res.status(400).json({ message: "Validation failed", errors: v.errors });
         return;
       }
 
       res.status(200).json(
-        await this.service.resolveReconciliation(req.params.reconciliationId, req.body)
+        await this.service.resolveReconciliation(req.params.reconciliationId, input)
       );
     } catch (err) {
       next(err);

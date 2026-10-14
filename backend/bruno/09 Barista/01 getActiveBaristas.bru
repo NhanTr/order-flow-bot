@@ -1,0 +1,22 @@
+meta {
+  name: getActiveBaristas
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/barista/employees
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List active Baristas eligible for assignment
+
+  Source: backend/docs/openapi.yaml
+
+}

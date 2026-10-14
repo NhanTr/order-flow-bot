@@ -7,6 +7,7 @@ import {
   TransactionMatchStatus,
 } from "@prisma/client";
 import { prisma } from "../../db";
+import { PUBLIC_USER_SELECT } from "../auth/public-user.select";
 
 export interface ResolveReconciliationInput {
   resolvedByUserId: string;
@@ -21,7 +22,7 @@ export class ReconciliationService {
     return this.db.sepayTransaction.findMany({
       include: {
         payment: { include: { order: true } },
-        resolvedBy: true,
+        resolvedBy: { select: PUBLIC_USER_SELECT },
       },
       orderBy: { receivedAt: "desc" },
     });
@@ -32,7 +33,7 @@ export class ReconciliationService {
       where: { id: transactionId },
       include: {
         payment: { include: { order: true } },
-        resolvedBy: true,
+        resolvedBy: { select: PUBLIC_USER_SELECT },
       },
     });
 
@@ -50,7 +51,7 @@ export class ReconciliationService {
       },
       include: {
         payment: { include: { order: true } },
-        resolvedBy: true,
+        resolvedBy: { select: PUBLIC_USER_SELECT },
       },
       orderBy: { receivedAt: "desc" },
     });
@@ -61,7 +62,7 @@ export class ReconciliationService {
       where: { id: reconciliationId },
       include: {
         payment: { include: { order: true } },
-        resolvedBy: true,
+        resolvedBy: { select: PUBLIC_USER_SELECT },
       },
     });
 
@@ -103,7 +104,7 @@ export class ReconciliationService {
         },
         include: {
           payment: { include: { order: true } },
-          resolvedBy: true,
+          resolvedBy: { select: PUBLIC_USER_SELECT },
         },
       });
 

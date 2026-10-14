@@ -1,0 +1,22 @@
+meta {
+  name: deleteMenuCategory
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/admin/menu-categories/{{categoryId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Delete an unused menu category
+
+  Source: backend/docs/openapi.yaml
+
+}

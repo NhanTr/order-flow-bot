@@ -1,0 +1,20 @@
+meta {
+  name: confirmCash
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/payments/cash/confirm
+  body: none
+  auth: none
+}
+
+headers {
+  x-bot-internal-secret: {{botInternalSecret}}
+  x-telegram-user-id: {{staffTelegramUserId}}
+}
+
+docs {
+  Internal Telegram API. Requires an ACTIVE employee with the corresponding role and matching BOT_INTERNAL_SECRET.
+}

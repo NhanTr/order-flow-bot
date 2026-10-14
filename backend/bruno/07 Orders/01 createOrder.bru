@@ -1,0 +1,49 @@
+meta {
+  name: createOrder
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "createdByUserId": "{{userId}}",
+    "items": [
+      {
+        "menuItemId": "{{menuItemId}}",
+        "quantity": 1,
+        "note": "Bruno test"
+      }
+    ],
+    "customerNote": "Bruno test"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = (data.order ?? data).id;
+    if (value) bru.setVar("orderId", value);
+  }
+}
+
+docs {
+  Create a service order
+
+  Source: backend/docs/openapi.yaml
+
+}

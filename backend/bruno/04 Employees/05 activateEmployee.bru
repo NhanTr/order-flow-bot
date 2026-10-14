@@ -1,0 +1,22 @@
+meta {
+  name: activateEmployee
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/employees/{{employeeId}}/activate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Activate an employee
+
+  Source: backend/docs/openapi.yaml
+
+}

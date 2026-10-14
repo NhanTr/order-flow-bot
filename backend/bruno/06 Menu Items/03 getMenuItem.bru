@@ -1,0 +1,22 @@
+meta {
+  name: getMenuItem
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/menu-items/{{menuItemId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get a menu item by ID
+
+  Source: backend/docs/openapi.yaml
+
+}

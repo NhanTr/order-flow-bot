@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import { requireAuthenticatedActor } from "../auth/auth.middleware";
 import { PaymentService } from "./payment.service";
 import { validateConfirmCash, validateInitQrPayment } from "./payment.validation";
 
@@ -13,7 +14,10 @@ export class PaymentController {
     next: NextFunction
   ): Promise<void> => {
     try {
-      const payments = await this.paymentService.listOrderPayments(req.params.orderId);
+      const payments = await this.paymentService.listOrderPayments(
+        req.params.orderId,
+        requireAuthenticatedActor(req),
+      );
       res.status(200).json({ data: payments });
     } catch (err) {
       next(err);
@@ -32,7 +36,11 @@ export class PaymentController {
         return;
       }
 
-      const payment = await this.paymentService.confirmCash(req.params.orderId, req.body);
+      const payment = await this.paymentService.confirmCash(
+        req.params.orderId,
+        req.body,
+        requireAuthenticatedActor(req),
+      );
       res.status(200).json(payment);
     } catch (err) {
       next(err);
@@ -51,7 +59,11 @@ export class PaymentController {
         return;
       }
 
-      const result = await this.paymentService.initQrPayment(req.params.orderId, req.body);
+      const result = await this.paymentService.initQrPayment(
+        req.params.orderId,
+        req.body,
+        requireAuthenticatedActor(req),
+      );
       res.status(200).json(result);
     } catch (err) {
       next(err);

@@ -1,0 +1,32 @@
+meta {
+  name: claimOrder
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/claim
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "baristaId": "{{baristaId}}"
+  }
+}
+
+docs {
+  Atomically claim a queued order
+
+  Source: backend/docs/openapi.yaml
+
+}
