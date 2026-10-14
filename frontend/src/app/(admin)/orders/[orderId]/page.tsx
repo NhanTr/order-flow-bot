@@ -21,8 +21,8 @@ import {
   getOrder,
   getOrderPayments,
   getCurrentUser,
-  getMenuItems,
-  getCategories,
+  getPublicMenuItems,
+  getPublicCategories,
   confirmCash,
   initQrPayment,
   refundOrder,
@@ -148,8 +148,8 @@ function OrderDetailView({ orderId }: { orderId: string }) {
   // Dữ liệu thực đơn để thêm món
   const loadMenu = useCallback(async () => {
     const [itemsPayload, categoriesPayload] = await Promise.all([
-      getMenuItems(500),
-      getCategories(),
+      getPublicMenuItems(),
+      getPublicCategories(),
     ]);
     return { items: itemsPayload.data, categories: categoriesPayload.data };
   }, []);
@@ -186,9 +186,12 @@ function OrderDetailView({ orderId }: { orderId: string }) {
   const paymentMethod = order?.paymentMethod === "CASH" ? "cash" : "qr";
   const paymentStatus = order?.paymentStatus === "REVIEW" ? "PAYMENT_REVIEW" : (order?.paymentStatus ?? "UNPAID");
   const isUnpaid = order?.paymentStatus === "UNPAID" && order?.fulfillmentStatus === "PENDING_PAYMENT";
-  const canEditItems = order?.paymentStatus === "UNPAID" && order?.fulfillmentStatus === "PENDING_PAYMENT";
-  const canRefund = ["PAID", "OVERPAID", "UNDERPAID"].includes(order?.paymentStatus ?? "");
-  const canCancel = ["PENDING_PAYMENT", "QUEUED", "PREPARING"].includes(order?.fulfillmentStatus ?? "");
+  const isOwner = me?.role === "OWNER";
+  const ownsOrder = Boolean(me && order && me.id === order.createdByUserId);
+  const canOperateOwnOrder = Boolean(isOwner || ownsOrder);
+  const canEditItems = canOperateOwnOrder && order?.paymentStatus === "UNPAID" && order?.fulfillmentStatus === "PENDING_PAYMENT";
+  const canRefund = Boolean(isOwner && ["PAID", "OVERPAID", "UNDERPAID"].includes(order?.paymentStatus ?? ""));
+  const canCancel = canOperateOwnOrder && ["PENDING_PAYMENT", "QUEUED", "PREPARING"].includes(order?.fulfillmentStatus ?? "");
 
   const timeline = useMemo(() => {
     if (!order) return [];
@@ -233,17 +236,15 @@ function OrderDetailView({ orderId }: { orderId: string }) {
     }
   };
 
-  const currentUserId = me?.id;
-
   /* ── Xác nhận tiền mặt ── */
   const confirmCashSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!order || !currentUserId) {
+    if (!order || !canOperateOwnOrder) {
       toast.push("Không xác định được tài khoản đang đăng nhập.", "error");
       return;
     }
     void act(
-      () => confirmCash(order.id, { confirmedByUserId: currentUserId, amount: totalVnd }),
+      () => confirmCash(order.id, { amount: totalVnd }),
       `Đã xác nhận thu tiền mặt ${formatVnd(totalVnd)} cho đơn ${order.orderCode}.`,
     );
     setCashOpen(false);
@@ -251,7 +252,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
 
   /* ── Khởi tạo QR ── */
   const openQr = async () => {
-    if (!order || !currentUserId) {
+    if (!order || !canOperateOwnOrder) {
       toast.push("Không xác định được tài khoản đang đăng nhập.", "error");
       return;
     }
@@ -259,7 +260,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
     setQrContent("Đang khởi tạo...");
     setQrAmount("0");
     try {
-      const result = await initQrPayment(order.id, { requestedByUserId: currentUserId });
+      const result = await initQrPayment(order.id);
       setQrContent(result.transferContent);
       setQrAmount(result.amount);
     } catch (actionError) {
@@ -290,7 +291,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
   /* ── Hoàn tiền (Refund) ── */
   const submitRefund = (e: FormEvent) => {
     e.preventDefault();
-    if (!order || !currentUserId) return;
+    if (!order || !isOwner) return;
     const amount = Math.min(Math.max(0, refundAmount || 0), paidAmount || totalVnd);
     if (amount <= 0) {
       toast.push("Số tiền hoàn phải lớn hơn 0.", "error");
@@ -301,7 +302,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
       return;
     }
     void act(
-      () => refundOrder(order.id, { refundedByUserId: currentUserId, reason: refundReason.trim(), amount }),
+      () => refundOrder(order.id, { reason: refundReason.trim(), amount }),
       `Đã hoàn tiền ${formatVnd(amount)} cho đơn ${order.orderCode}.`,
     );
     setRefundOpen(false);
@@ -312,13 +313,13 @@ function OrderDetailView({ orderId }: { orderId: string }) {
   /* ── Hủy đơn ── */
   const submitCancel = (e: FormEvent) => {
     e.preventDefault();
-    if (!order || !currentUserId) return;
+    if (!order || !canOperateOwnOrder) return;
     if (!cancelReason.trim()) {
       toast.push("Vui lòng nhập lý do hủy đơn.", "error");
       return;
     }
     void act(
-      () => cancelOrder(order.id, { reason: cancelReason.trim(), requesterId: currentUserId }),
+      () => cancelOrder(order.id, { reason: cancelReason.trim() }),
       `Đã hủy đơn ${order.orderCode}.`,
     );
     setCancelOpen(false);
@@ -571,7 +572,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
                   📱 Khởi tạo QR
                 </button>
               )}
-              {order.paymentStatus === "UNDERPAID" && (
+              {isOwner && order.paymentStatus === "UNDERPAID" && (
                 <>
                   <button type="button" className="btn w-full" disabled={busy} onClick={confirmUnderpaidAsPaid}>
                     ✓ Xác nhận đã thu đủ (+{formatVnd(Math.max(0, expectedAmount - paidAmount))})
@@ -616,7 +617,7 @@ function OrderDetailView({ orderId }: { orderId: string }) {
               )}
             </div>
 
-            {order.fulfillmentStatus !== "DELIVERED" && order.fulfillmentStatus !== "CANCELLED" && (
+            {isOwner && order.fulfillmentStatus !== "DELIVERED" && order.fulfillmentStatus !== "CANCELLED" && (
               <div className="mt-4 border-t border-line pt-4">
                 <Field label="Đổi trạng thái thực hiện">
                   <div className="flex gap-2">
@@ -766,9 +767,13 @@ function OrderDetailView({ orderId }: { orderId: string }) {
             <button type="button" className="btn-ghost" onClick={() => setQrOpen(false)}>
               Hủy
             </button>
-            <button type="button" className="btn" disabled={busy} onClick={confirmQrPaid}>
-              Đã nhận tiền (PAID)
-            </button>
+            {isOwner ? (
+              <button type="button" className="btn" disabled={busy} onClick={confirmQrPaid}>
+                Đã nhận tiền (PAID)
+              </button>
+            ) : (
+              <span className="text-xs text-muted">Thanh toán sẽ được cập nhật tự động sau khi ngân hàng xác nhận.</span>
+            )}
           </div>
         </div>
       </Modal>

@@ -61,6 +61,8 @@ services:
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
       JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-2592000}
       REDIS_URL: redis://redis:6379
+      API_PROXY_SECRET: ${API_PROXY_SECRET:?Set API_PROXY_SECRET in .env.docker}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
       BOT_INTERNAL_SECRET: ${BOT_INTERNAL_SECRET:?Set BOT_INTERNAL_SECRET in .env.docker}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env.docker}
       TELEGRAM_AUTH_MAX_AGE_SECONDS: ${TELEGRAM_AUTH_MAX_AGE_SECONDS:-300}
@@ -90,10 +92,16 @@ services:
     image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-frontend:${ORDER_FLOW_VERSION:-latest}
     environment:
       API_BASE_URL: http://api:3001/api/v1
+      API_PROXY_SECRET: ${API_PROXY_SECRET:?Set API_PROXY_SECRET in .env.docker}
+      BFF_REDIS_URL: redis://redis:6379
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env.docker}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
       api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

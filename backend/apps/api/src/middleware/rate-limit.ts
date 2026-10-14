@@ -6,8 +6,7 @@ import { createProxyClientIdentity, getSecurityClientIp } from "./proxy-client-i
 export interface RedisRateLimitClient {
   eval(
     script: string,
-    numberOfKeys: number,
-    ...values: Array<string | number>
+    options: { keys: string[]; arguments: string[] },
   ): Promise<unknown>;
 }
 
@@ -97,7 +96,10 @@ function createFixedWindowLimiter(
     try {
       const key = `${keyPrefix}:${digest(identity(request))}`;
       const [count, ttlMs] = parseRedisTuple(
-        await redis.eval(FIXED_WINDOW_SCRIPT, 1, key, windowMs),
+        await redis.eval(FIXED_WINDOW_SCRIPT, {
+          keys: [key],
+          arguments: [windowMs.toString()],
+        }),
       );
       if (count > limit) {
         sendRateLimited(response, request, ttlMs, "Too many requests");
@@ -135,12 +137,10 @@ function createExportLimiter(
     try {
       const result = await redis.eval(
         EXPORT_ACQUIRE_SCRIPT,
-        2,
-        quotaKey,
-        lockKey,
-        TEN_MINUTES_MS,
-        EXPORT_LOCK_MS,
-        token,
+        {
+          keys: [quotaKey, lockKey],
+          arguments: [TEN_MINUTES_MS.toString(), EXPORT_LOCK_MS.toString(), token],
+        },
       );
       if (!Array.isArray(result) || result.length < 3) throw new Error("Invalid Redis export response");
       const acquired = Number(result[0]) === 1;
@@ -160,7 +160,10 @@ function createExportLimiter(
       const release = () => {
         if (released) return;
         released = true;
-        void redis.eval(EXPORT_RELEASE_SCRIPT, 1, lockKey, token).catch(() => undefined);
+        void redis.eval(EXPORT_RELEASE_SCRIPT, {
+          keys: [lockKey],
+          arguments: [token],
+        }).catch(() => undefined);
       };
       response.once("finish", release);
       response.once("close", release);

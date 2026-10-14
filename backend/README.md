@@ -135,6 +135,8 @@ in the repository `.env.example`. Only SHA-256 refresh-token hashes are stored.
 Sessions are shared across API instances and survive an individual API restart.
 If Redis is unavailable, authenticated operations fail with HTTP 503; the API
 does not fall back to process memory.
+The Admin Web BFF and API must share a distinct `API_PROXY_SECRET`; the API
+accepts the BFF client-IP header only when that credential matches.
 
 Apply `prisma/sql/2026-08-04_users_rls.sql` to prevent the `users` table and
 its password hashes from being read through Supabase's public Data API. The API

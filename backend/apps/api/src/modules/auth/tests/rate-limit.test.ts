@@ -14,10 +14,10 @@ class FakeRedis implements RedisRateLimitClient {
   public now = 0;
   public unavailable = false;
 
-  async eval(script: string, numberOfKeys: number, ...values: Array<string | number>): Promise<unknown> {
+  async eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown> {
     if (this.unavailable) throw new Error("redis unavailable");
-    const keys = values.slice(0, numberOfKeys).map(String);
-    const args = values.slice(numberOfKeys).map(String);
+    const keys = options.keys;
+    const args = options.arguments;
     keys.forEach((key) => this.expire(key));
 
     if (script.includes("order-flow:fixed-window")) {

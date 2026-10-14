@@ -29,6 +29,8 @@ const envSchema = z.object({
     (value) => value.startsWith("redis://") || value.startsWith("rediss://"),
     "REDIS_URL must use redis:// or rediss://",
   ),
+  API_PROXY_SECRET: z.string().min(32),
+  TRUST_PROXY_HOPS: z.coerce.number().int().nonnegative().default(0),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(15 * 60),
@@ -44,6 +46,7 @@ const envSchema = z.object({
   const secrets = [
     ["JWT_ACCESS_SECRET", env.JWT_ACCESS_SECRET],
     ["JWT_REFRESH_SECRET", env.JWT_REFRESH_SECRET],
+    ["API_PROXY_SECRET", env.API_PROXY_SECRET],
     ...(env.BOT_INTERNAL_SECRET
       ? [["BOT_INTERNAL_SECRET", env.BOT_INTERNAL_SECRET] as const]
       : []),

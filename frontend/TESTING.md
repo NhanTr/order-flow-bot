@@ -32,6 +32,8 @@ npm run dev:api            # http://localhost:3001
 
 ```bash
 cd frontend
+cp .env.example .env.local
+# API_PROXY_SECRET phải trùng với API_PROXY_SECRET trong file .env.local ở root.
 npm install
 npm run dev                # http://localhost:3000
 ```
@@ -42,6 +44,19 @@ Mở `http://localhost:3000` → tự chuyển về `/login`. Dùng đúng **use
 
 > Nếu thấy **"API backend chưa sẵn sàng" (503)** → backend chưa chạy hoặc sai `API_UPSTREAM_URL`.
 > Nếu thấy **401 khi điều hướng** → phiên hết hạn, FE tự refresh token; nếu refresh lỗi sẽ đưa về trang login.
+
+### Kiểm thử bảo mật tự động
+
+```bash
+# Unit tests: Origin/CSRF, allowlist proxy, role matrix, pagination và refresh single-flight.
+npm run test:security
+
+# Integration test hai BFF instance dùng chung Redis disposable.
+TEST_REDIS_URL=redis://127.0.0.1:56379 npm run test:security
+```
+
+`TEST_REDIS_URL` chỉ chấp nhận loopback và bắt buộc dùng port khác 6379. Không trỏ
+test này vào Redis dùng cho development hoặc production.
 
 ---
 
@@ -72,10 +87,12 @@ Mở `http://localhost:3000` → tự chuyển về `/login`. Dùng đúng **use
 - [ ] Nút **Xử lý xong** (đơn QUEUED) → modal ghi chú → DELIVERED.
 - [ ] Nút **Hủy đơn** (đơn PENDING/UNPAID) → CANCELLED.
 - [ ] Nút **+ Tạo đơn** ở góc phải → sang `/orders/new`.
+- [ ] Tài khoản `SERVICE_STAFF` chỉ thấy menu Đơn hàng; truy cập trực tiếp Dashboard, Thanh toán, Đối soát, Nhân viên, Thực đơn, Báo cáo hoặc Nhật ký chuyển sang `/forbidden`.
+- [ ] Tài khoản `SERVICE_STAFF` chỉ nhận các đơn do chính mình tạo; kiểm tra với hơn 100 đơn để xác nhận các trang API tiếp theo vẫn được tải.
 
 ### 2.4 Tạo đơn thủ công (`/orders/new`)
 
-- [ ] Chọn **Người tạo** (mặc định là chính admin, hoặc chọn nhân viên phục vụ).
+- [ ] Người tạo luôn là tài khoản đăng nhập; request không chứa `createdByUserId`.
 - [ ] Chọn **Phương thức thanh toán**: Tiền mặt / Chuyển khoản QR.
 - [ ] Nhập **Vị trí / ghi chú đơn**.
 - [ ] Thêm nhiều dòng món (chọn theo danh mục, chỉ hiện món đang bán), sửa SL + ghi chú từng món; tổng tiền tự tính.
@@ -96,6 +113,7 @@ Mở `http://localhost:3000` → tự chuyển về `/login`. Dùng đúng **use
 - [ ] Đơn QR chưa thanh toán → **Khởi tạo QR** → hiện nội dung chuyển khoản → **Đã nhận tiền (PAID)**.
 - [ ] Đơn thiếu tiền (UNDERPAID) → nút **Xác nhận đã thu đủ** (+số thiếu) và **Hoàn lại số đã nhận**.
 - [ ] Đơn PAID/OVERPAID → **Hoàn tiền** (nhập số tiền + lý do bắt buộc) → REFUNDED.
+- [ ] SERVICE_STAFF có thể thu tiền mặt/khởi tạo QR cho đơn của mình nhưng không thấy hoàn tiền, xác nhận QR thủ công hoặc đổi trạng thái override của OWNER.
 
 **Hủy / đổi trạng thái**
 - [ ] Nút **Hủy đơn** chỉ hiện khi trạng thái PENDING_PAYMENT/QUEUED/PREPARING; lý do bắt buộc.

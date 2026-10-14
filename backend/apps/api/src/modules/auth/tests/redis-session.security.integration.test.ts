@@ -22,6 +22,8 @@ const env = {
   PORT: 3001,
   DATABASE_URL: "postgresql://test:test@127.0.0.1:55439/order_flow_security_test",
   REDIS_URL: "redis://127.0.0.1:56379",
+  API_PROXY_SECRET: "integration-proxy-secret-at-least-32-characters",
+  TRUST_PROXY_HOPS: 0,
   JWT_ACCESS_SECRET: "integration-access-secret-at-least-32-characters",
   JWT_REFRESH_SECRET: "integration-refresh-secret-at-least-32-characters",
   JWT_ACCESS_TTL_SECONDS: 900,

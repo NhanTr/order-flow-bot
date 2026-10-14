@@ -12,6 +12,12 @@ interface SessionPayload {
   expiresIn: number;
 }
 
+export interface BffConfig {
+  publicOrigin: string;
+  proxySecret: string;
+  trustProxyHops: number;
+}
+
 const cookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
@@ -35,4 +41,31 @@ export async function readSessionTokens() {
     accessToken: store.get(ACCESS_COOKIE)?.value,
     refreshToken: store.get(REFRESH_COOKIE)?.value,
   };
+}
+
+export function getBffConfig(): BffConfig {
+  const publicOrigin = process.env.PUBLIC_ORIGIN
+    ?? (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000");
+  const proxySecret = process.env.API_PROXY_SECRET ?? "";
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? "0");
+  if (!publicOrigin) throw new Error("PUBLIC_ORIGIN is required");
+  if (proxySecret.length < 32) throw new Error("API_PROXY_SECRET must contain at least 32 characters");
+  if (!Number.isSafeInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error("TRUST_PROXY_HOPS must be a non-negative safe integer");
+  }
+  return { publicOrigin: new URL(publicOrigin).origin, proxySecret, trustProxyHops };
+}
+
+export function noStore(response: NextResponse): NextResponse {
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  return response;
+}
+
+export async function safeJson(response: Response): Promise<unknown | null> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }

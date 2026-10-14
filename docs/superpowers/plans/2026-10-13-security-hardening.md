@@ -76,12 +76,12 @@ Coordinator provisions worktrees only with user authorization and sandbox approv
 
 **Interfaces:** API Redis config REDIS_URL; BFF config BFF_REDIS_URL; API_PROXY_SECRET in API/BFF; PUBLIC_ORIGIN in BFF; TRUST_PROXY_HOPS defaults 0 and production ingress config 1. Dedicated runtime API_DATABASE_URL/WORKER_DATABASE_URL are mapped to each process DATABASE_URL; administrative POSTGRES/bootstrap credential never injected into API/worker. Secrets are distinct and minimum 32 characters. Domain/public-origin/operator passwords have no real defaults.
 
-- [ ] Integrate D middleware in documented order; add parser-error mapping, exact rate/size settings and export locks. Account/IP throttling must continue to work behind BFF.
-- [ ] Integrate E Redis session composition/disposal; change every session-store consumer/test to await operations; no global clear on shutdown. Remove obsolete debug/list interface.
-- [ ] Integrate F authenticated BFF identity headers and Redis single-flight config. Cache-Control:no-store for session/sensitive responses; explicitly protect cookie mutations against cross-origin requests.
+- [x] Integrate D middleware in documented order; add parser-error mapping, exact rate/size settings and export locks. Account/IP throttling must continue to work behind BFF.
+- [x] Integrate E Redis session composition/disposal; change every session-store consumer/test to await operations; no global clear on shutdown. Remove obsolete debug/list interface.
+- [x] Integrate F authenticated BFF identity headers and Redis single-flight config. Cache-Control:no-store for session/sensitive responses; explicitly protect cookie mutations against cross-origin requests.
 - [ ] Integrate G private ingress, distinct DB/Redis credentials, verified TLS and initialization/migration path. Fresh DB images AND existing-volume upgrades must include new refund-idempotency SQL; bootstrap runtime grants only after schema migrations.
 - [ ] Update api-contract.md/openapi.yaml for actor-free inputs, permission table, bounded page envelopes, limits/status codes, webhook ignored behavior and Redis outage503. Preserve menu/employee limits1000.
-- [ ] Update AGENTS architecture/config/operational navigation together with actual changes.
+- [x] Update AGENTS architecture/config/operational navigation together with actual changes through Packet F.
 
 ### Task 3: Acceptance and branch handoff
 
@@ -97,13 +97,12 @@ Coordinator provisions worktrees only with user authorization and sandbox approv
 
 ## Current state
 
-Local dev branch exists. Packet A has been implemented and accepted after unit,
-typecheck and disposable Docker integration verification. Hermes in Herdr pane
-`wA:p2` completed B1 and B2. B2 was accepted on 2026-10-14 after coordinator
-verification: 61 relevant unit tests, 9 Docker integration tests, API typecheck
-and diff checks passed. The user then explicitly stopped execution at B2;
-C through G are pending and C1 was never dispatched. The user subsequently
-authorized committing and pushing the accumulated changes to origin/dev.
-Full API suite: 111 passed, 2 known failures from missing DOCX templates.
+Local `dev` contains accepted Packets A through E. Packet F is implemented and
+accepted locally after 18 frontend security tests (including real Redis
+multi-instance single-flight), frontend lint/build, 29 Node API tests, 209 API
+Vitest tests, and 7 Redis security integration tests. The 18 PostgreSQL
+integration cases remain part of whole-branch acceptance and require an explicit
+disposable `TEST_DATABASE_URL`. Packet G and final contract/acceptance work are
+pending.
 Current details and evidence:
 [execution ledger](../execution/2026-10-13-security-ledger.md).

@@ -21,6 +21,8 @@ const env: AppEnv = {
   PORT: 3001,
   DATABASE_URL: "postgresql://test:test@localhost:5432/test",
   REDIS_URL: "redis://127.0.0.1:56379",
+  API_PROXY_SECRET: "test-proxy-secret-at-least-32-characters",
+  TRUST_PROXY_HOPS: 0,
   JWT_ACCESS_SECRET: "access-secret-that-is-at-least-32-characters",
   JWT_REFRESH_SECRET: "refresh-secret-that-is-at-least-32-characters",
   JWT_ACCESS_TTL_SECONDS: 900,
@@ -190,6 +192,7 @@ test("environment requires Redis and distinct authentication secrets", () => {
     NODE_ENV: "test",
     DATABASE_URL: env.DATABASE_URL,
     REDIS_URL: env.REDIS_URL,
+    API_PROXY_SECRET: env.API_PROXY_SECRET,
     JWT_ACCESS_SECRET: env.JWT_ACCESS_SECRET,
     JWT_REFRESH_SECRET: env.JWT_REFRESH_SECRET,
     BOT_INTERNAL_SECRET: env.BOT_INTERNAL_SECRET,
@@ -203,6 +206,10 @@ test("environment requires Redis and distinct authentication secrets", () => {
   assert.throws(() => parseAppEnv({
     ...base,
     BOT_INTERNAL_SECRET: env.JWT_ACCESS_SECRET,
+  }));
+  assert.throws(() => parseAppEnv({
+    ...base,
+    API_PROXY_SECRET: env.JWT_ACCESS_SECRET,
   }));
 });
 

@@ -137,7 +137,8 @@ Mở `.env.local` và thay các giá trị tối thiểu sau. Phần mật khẩ
 phải giống `POSTGRES_PASSWORD` của `.env.db.local`.
 
 Có thể tạo các secret ngẫu nhiên bằng `openssl rand -hex 32`. Hãy dùng kết quả
-khác nhau cho JWT access, JWT refresh và `BOT_INTERNAL_SECRET`.
+khác nhau cho JWT access, JWT refresh, `BOT_INTERNAL_SECRET` và
+`API_PROXY_SECRET`.
 
 ```dotenv
 DATABASE_URL="postgresql://order_flow:MAT_KHAU_DATABASE@localhost:55432/order_flow"
@@ -146,6 +147,9 @@ DIRECT_URL="postgresql://order_flow:MAT_KHAU_DATABASE@localhost:55432/order_flow
 JWT_ACCESS_SECRET="chuoi-ngau-nhien-rieng-thu-nhat-dai-it-nhat-32-ky-tu"
 JWT_REFRESH_SECRET="chuoi-ngau-nhien-rieng-thu-hai-dai-it-nhat-32-ky-tu"
 BOT_INTERNAL_SECRET="chuoi-bi-mat-dung-chung-giua-api-va-telegram-bot"
+API_PROXY_SECRET="chuoi-bi-mat-rieng-giua-admin-web-va-api-dai-it-nhat-32-ky-tu"
+REDIS_URL="redis://localhost:6379"
+TRUST_PROXY_HOPS=0
 
 SEED_OWNER_FULL_NAME="Store Owner"
 SEED_OWNER_USERNAME="owner"
@@ -202,6 +206,8 @@ npm --prefix backend run dev:api
 Terminal 2 — Admin Web:
 
 ```bash
+cp frontend/.env.example frontend/.env.local
+# Đặt API_PROXY_SECRET giống chính xác giá trị trong .env.local ở root.
 npm --prefix frontend run dev
 ```
 
@@ -290,11 +296,8 @@ npm --prefix backend run check:bot
 npm --prefix backend run test:bot
 npm --prefix frontend run lint
 npm --prefix frontend run build
+npm --prefix frontend run test:security
 ```
-
-Hai test export biểu mẫu thuế cần các DOCX template tương ứng trong
-`backend/docs`. Nếu các file template không có trong bản clone, hai test đó sẽ
-báo `ENOENT`; phần còn lại của API vẫn có thể chạy.
 
 ## 10. Dừng dịch vụ
 

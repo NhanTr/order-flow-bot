@@ -1,5 +1,5 @@
 import express from "express";
-import Redis from "ioredis";
+import { createClient, type RedisClientType } from "redis";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -9,8 +9,8 @@ import { requestId } from "../../../middleware/request-id";
 
 const testRedisUrl = process.env.TEST_REDIS_URL;
 const runIntegration = testRedisUrl ? describe : describe.skip;
-let firstRedis: Redis | undefined;
-let secondRedis: Redis | undefined;
+let firstRedis: RedisClientType | undefined;
+let secondRedis: RedisClientType | undefined;
 
 function assertDisposableRedisUrl(value: string): void {
   const url = new URL(value);
@@ -23,7 +23,7 @@ function assertDisposableRedisUrl(value: string): void {
   }
 }
 
-function appFor(redis: Redis, prefix: string) {
+function appFor(redis: RedisClientType, prefix: string) {
   const app = express();
   const limiters = createSecurityLimiters(redis, {
     proxySecret: "integration-proxy-secret",
@@ -39,13 +39,18 @@ function appFor(redis: Redis, prefix: string) {
 runIntegration("Redis rate-limit security integration", () => {
   beforeAll(async () => {
     assertDisposableRedisUrl(testRedisUrl!);
-    firstRedis = new Redis(testRedisUrl!, { lazyConnect: true, maxRetriesPerRequest: 1 });
-    secondRedis = new Redis(testRedisUrl!, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    firstRedis = createClient({ url: testRedisUrl!, socket: { connectTimeout: 1_000 } });
+    secondRedis = createClient({ url: testRedisUrl!, socket: { connectTimeout: 1_000 } });
+    firstRedis.on("error", () => undefined);
+    secondRedis.on("error", () => undefined);
     await Promise.all([firstRedis.connect(), secondRedis.connect()]);
   });
 
   afterAll(async () => {
-    await Promise.allSettled([firstRedis?.quit(), secondRedis?.quit()]);
+    await Promise.allSettled([
+      firstRedis?.isOpen ? firstRedis.quit() : undefined,
+      secondRedis?.isOpen ? secondRedis.quit() : undefined,
+    ]);
   });
 
   it("atomically shares the login IP counter between API instances", async () => {

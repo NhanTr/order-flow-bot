@@ -31,7 +31,7 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as ApiErrorPayload | null;
     if (response.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.href = "/login";
+      window.location.replace("/login");
     }
 
     let errorMessage = payload?.error?.message ?? payload?.message ?? "Không thể tải dữ liệu từ máy chủ.";
@@ -206,12 +206,31 @@ export interface ApiAuditLog {
 
 export interface Paginated<T> {
   data: T[];
-  total?: number;
-  meta?: { total: number; page: number; limit: number; totalPages: number };
+  total: number;
+  page: number;
+  limit: number;
 }
 
-export function getOrders(limit = 100) {
-  return apiRequest<Paginated<ApiOrder>>(`admin/orders?limit=${limit}`);
+export async function collectPaginated<T>(
+  fetchPage: (page: number, limit: number) => Promise<Paginated<T>>,
+  limit = 100,
+): Promise<T[]> {
+  const collected: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await fetchPage(page, limit);
+    collected.push(...result.data);
+    if (result.data.length === 0 || collected.length >= result.total) {
+      return collected;
+    }
+  }
+}
+
+export function getOrdersPage(page = 1, limit = 100) {
+  return apiRequest<Paginated<ApiOrder>>(`admin/orders?page=${page}&limit=${limit}`);
+}
+
+export async function getOrders(limit = 100) {
+  return { data: await collectPaginated(getOrdersPage, Math.min(limit, 100)) };
 }
 
 /* ── Quản lý đơn hàng từ web (tạo / sửa món / hủy) ── */
@@ -223,7 +242,6 @@ export interface ApiCreateOrderItem {
 }
 
 export interface ApiCreateOrderInput {
-  createdByUserId: string;
   paymentMethod?: "CASH" | "QR";
   customerNote?: string;
   items: ApiCreateOrderItem[];
@@ -255,7 +273,7 @@ export function deleteOrderItem(orderId: string, itemId: string) {
   return apiRequest<ApiOrderLite>(`orders/${orderId}/items/${itemId}`, { method: "DELETE" });
 }
 
-export function cancelOrder(orderId: string, body: { reason: string; requesterId?: string }) {
+export function cancelOrder(orderId: string, body: { reason: string }) {
   return apiRequest<ApiOrderLite>(`orders/${orderId}/cancel`, { method: "POST", body });
 }
 
@@ -322,16 +340,24 @@ export function getCurrentUser() {
   return apiRequest<{ data: ApiUser }>("admin/auth/me");
 }
 
-export function getTransactions() {
-  return apiRequest<{ data: ApiSepayTransactionFull[] }>("admin/transactions");
+export function getTransactionsPage(page = 1, limit = 100) {
+  return apiRequest<Paginated<ApiSepayTransactionFull>>(`admin/transactions?page=${page}&limit=${limit}`);
+}
+
+export async function getTransactions() {
+  return { data: await collectPaginated(getTransactionsPage) };
 }
 
 export function getTransaction(transactionId: string) {
   return apiRequest<ApiSepayTransactionFull>(`admin/transactions/${transactionId}`);
 }
 
-export function getReconciliations() {
-  return apiRequest<{ data: ApiSepayTransactionFull[] }>("admin/reconciliations");
+export function getReconciliationsPage(page = 1, limit = 100) {
+  return apiRequest<Paginated<ApiSepayTransactionFull>>(`admin/reconciliations?page=${page}&limit=${limit}`);
+}
+
+export async function getReconciliations() {
+  return { data: await collectPaginated(getReconciliationsPage) };
 }
 
 export function getReconciliation(reconciliationId: string) {
@@ -382,7 +408,7 @@ export async function downloadRevenueExport(
 
 export function resolveReconciliation(
   reconciliationId: string,
-  body: { resolvedByUserId: string; resolutionAction: string; resolutionNote: string },
+  body: { resolutionAction: string; resolutionNote: string },
 ) {
   return apiRequest<ApiSepayTransactionFull>(`admin/reconciliations/${reconciliationId}/resolve`, {
     method: "POST",
@@ -390,18 +416,18 @@ export function resolveReconciliation(
   });
 }
 
-export function refundOrder(orderId: string, body: { refundedByUserId: string; reason: string; amount?: number }) {
+export function refundOrder(orderId: string, body: { reason: string; amount?: number }) {
   return apiRequest<ApiOrder>(`admin/orders/${orderId}/refund`, { method: "POST", body });
 }
 
-export function confirmCash(orderId: string, body: { confirmedByUserId: string; amount?: number }) {
+export function confirmCash(orderId: string, body: { amount?: number }) {
   return apiRequest<ApiOrder>(`orders/${orderId}/payments/cash/confirm`, { method: "POST", body });
 }
 
-export function initQrPayment(orderId: string, body: { requestedByUserId: string }) {
+export function initQrPayment(orderId: string) {
   return apiRequest<{ payment: ApiPayment; transferContent: string; amount: string }>(
     `orders/${orderId}/payments/qr`,
-    { method: "POST", body },
+    { method: "POST", body: {} },
   );
 }
 
@@ -409,8 +435,16 @@ export function getCategories() {
   return apiRequest<{ data: ApiCategory[] }>("admin/menu-categories");
 }
 
+export function getPublicCategories() {
+  return apiRequest<{ data: ApiCategory[] }>("menu/categories");
+}
+
 export function getMenuItems(limit = 100) {
   return apiRequest<Paginated<ApiMenuItem>>(`admin/menu-items?limit=${limit}`);
+}
+
+export function getPublicMenuItems() {
+  return apiRequest<{ data: ApiMenuItem[] }>("menu/items");
 }
 
 export function getMenuItem(itemId: string) {
@@ -425,8 +459,12 @@ export function getEmployee(employeeId: string) {
   return apiRequest<{ data: ApiUser }>(`admin/employees/${employeeId}`);
 }
 
-export function getAuditLogs() {
-  return apiRequest<{ data: ApiAuditLog[] }>("admin/audit-logs");
+export function getAuditLogsPage(page = 1, limit = 100) {
+  return apiRequest<Paginated<ApiAuditLog>>(`admin/audit-logs?page=${page}&limit=${limit}`);
+}
+
+export async function getAuditLogs() {
+  return { data: await collectPaginated(getAuditLogsPage) };
 }
 
 /* ── Quản lý danh mục thực đơn (admin) ── */

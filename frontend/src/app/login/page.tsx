@@ -237,14 +237,14 @@ export default function LoginPage() {
       });
       const payload = (await response.json().catch(() => null)) as {
         message?: string;
-        user?: unknown;
+        user?: { role?: "OWNER" | "SERVICE_STAFF" | "BARISTA" };
       } | null;
       if (!response.ok) {
         setError(payload?.message ?? "Tài khoản hoặc mật khẩu không đúng.");
         setBusy(false);
         return;
       }
-      router.replace("/dashboard");
+      router.replace(payload?.user?.role === "SERVICE_STAFF" ? "/orders" : "/dashboard");
     } catch {
       setError("Không thể kết nối máy chủ. Vui lòng kiểm tra backend và thử lại.");
       setBusy(false);
