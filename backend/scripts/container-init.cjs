@@ -1,5 +1,6 @@
 const { PrismaClient, UserRole, UserStatus } = require("@prisma/client");
 const { hash } = require("bcryptjs");
+const { bootstrapSecurity, safeErrorMessage } = require("./security-bootstrap.cjs");
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -8,6 +9,7 @@ function required(name) {
 }
 
 async function main() {
+  const adminDatabaseUrl = required("ADMIN_DATABASE_URL");
   const username = required("SEED_OWNER_USERNAME");
   const password = required("SEED_OWNER_PASSWORD");
   const fullName = process.env.SEED_OWNER_FULL_NAME?.trim() || "Store Owner";
@@ -20,7 +22,9 @@ async function main() {
     throw new Error("SEED_PASSWORD_ROUNDS must be an integer from 10 to 15");
   }
 
-  const prisma = new PrismaClient();
+  await bootstrapSecurity();
+
+  const prisma = new PrismaClient({ datasourceUrl: adminDatabaseUrl });
   try {
     const existing = await prisma.user.findUnique({
       where: { username },
@@ -50,6 +54,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Container database initialization failed", error);
+  console.error(`Container database initialization failed: ${safeErrorMessage(error)}`);
   process.exitCode = 1;
 });

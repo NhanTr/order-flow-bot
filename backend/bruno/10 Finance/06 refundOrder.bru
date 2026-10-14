@@ -1,0 +1,33 @@
+meta {
+  name: refundOrder
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/orders/{{orderId}}/refund
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "refundedByUserId": "{{userId}}",
+    "reason": "Refund Bruno test order"
+  }
+}
+
+docs {
+  Record a manual order refund
+
+  Source: backend/docs/openapi.yaml
+
+}

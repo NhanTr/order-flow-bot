@@ -1,7 +1,10 @@
 import { Router } from "express";
 
 import type { AuthServicePort } from "../modules/auth/auth.service.js";
-import { requireAdminAccess } from "../modules/auth/auth.middleware.js";
+import {
+  requireAdminAccess,
+  requireAdminAuth,
+} from "../modules/auth/auth.middleware.js";
 import { createAuthRouter } from "../modules/auth/auth.routes.js";
 import { createEmployeeRouter } from "../modules/employees/employee.routes.js";
 import type { EmployeeServicePort } from "../modules/employees/employee.service.js";
@@ -12,6 +15,7 @@ import {
 import type { CategoryServicePort } from "../modules/menu/category.service.js";
 import { createAdminItemRouter, createPublicItemRouter } from "../modules/menu/item.routes.js";
 import type { ItemServicePort } from "../modules/menu/item.service.js";
+import type { SecurityLimiters } from "../middleware/rate-limit.js";
 
 export interface OperationalRouterFactories {
   createOrderRouter?: () => Router;
@@ -26,9 +30,14 @@ export function createApiRouter(
   categoryService?: CategoryServicePort,
   itemService?: ItemServicePort,
   operationalRouters: OperationalRouterFactories = {},
+  securityLimiters?: Pick<SecurityLimiters, "authenticatedUser" | "export">,
 ): Router {
   const router = Router();
-  router.use(createAuthRouter(authService));
+  router.use(createAuthRouter(authService, securityLimiters?.authenticatedUser));
+
+  if (securityLimiters) {
+    router.use("/admin", requireAdminAccess(authService), securityLimiters.authenticatedUser);
+  }
 
   if (employeeService) {
     router.use("/admin/employees", createEmployeeRouter(authService, employeeService));
@@ -61,8 +70,21 @@ export function createApiRouter(
     // Order/Payment mutating routes are only consumed by authenticated web clients
     // (admin FE) — the Telegram Bot reaches /orders via the internal-secret-gated
     // telegram router, so requiring an admin token here does not affect the Bot.
-    router.use("/orders", requireAdminAccess(authService), createOrderRouter());
-    router.use("/barista", requireAdminAccess(authService), createBaristaRouter());
+    router.use(
+      "/orders",
+      requireAdminAccess(authService),
+      ...(securityLimiters ? [securityLimiters.authenticatedUser] : []),
+      createOrderRouter(),
+    );
+    router.use(
+      "/barista",
+      requireAdminAuth(authService),
+      ...(securityLimiters ? [securityLimiters.authenticatedUser] : []),
+      createBaristaRouter(),
+    );
+    if (securityLimiters) {
+      router.use("/admin/reports/revenue/export", securityLimiters.export);
+    }
     router.use("/admin", createAdminRouter(authService));
   }
 

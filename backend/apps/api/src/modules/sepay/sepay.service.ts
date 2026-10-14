@@ -12,10 +12,28 @@ import {
   recordPaymentReviewNotifications,
 } from "../notifications/notification-outbox.service";
 import { prisma } from "../../db";
+import { parseSepayWebhook } from "./sepay.validation";
+import {
+  NormalizedSepayTransaction,
+  SepayTransactionNormalizationError,
+} from "./sepay-transaction";
+
+const SERIALIZABLE_ATTEMPTS = 3;
+
+function prismaErrorCode(error: unknown): string | undefined {
+  return (error as { code?: string }).code;
+}
+
+function isExternalTransactionIdConflict(error: unknown): boolean {
+  if (prismaErrorCode(error) !== "P2002") return false;
+  const target = JSON.stringify((error as { meta?: { target?: unknown } }).meta?.target ?? "");
+  return /sepay_transaction_id|sepayTransactionId|sepay_transactions_sepay_transaction_id_key/i.test(target);
+}
 
 export interface SepayWebhookResult {
   duplicate: boolean;
   matched: boolean;
+  ignored?: boolean;
   transactionId: string;
   paymentId?: string | null;
   matchStatus: TransactionMatchStatus;
@@ -27,16 +45,44 @@ export class SepayService {
   public async handleWebhook(payload: any, headers: Record<string, any>): Promise<SepayWebhookResult> {
     this.verifyWebhook(headers);
 
-    return this.handleTrustedTransaction(payload);
+    let normalized: NormalizedSepayTransaction;
+    try {
+      normalized = parseSepayWebhook(payload);
+    } catch (error) {
+      if (error instanceof SepayTransactionNormalizationError) {
+        throw createHttpError(400, error.message);
+      }
+      throw error;
+    }
+
+    return this.handleTrustedTransaction(normalized);
   }
 
-  public async handleTrustedTransaction(payload: any): Promise<SepayWebhookResult> {
+  public async handleTrustedTransaction(normalized: NormalizedSepayTransaction): Promise<SepayWebhookResult> {
+    const configuredAccount = process.env.SEPAY_BANK_ACCOUNT?.trim();
+    if (!configuredAccount) {
+      throw createHttpError(503, "SePay bank account is not configured");
+    }
+    if (normalized.accountNumber !== configuredAccount || normalized.direction !== "in") {
+      return {
+        duplicate: false,
+        matched: false,
+        ignored: true,
+        transactionId: normalized.externalId,
+        paymentId: null,
+        matchStatus: TransactionMatchStatus.UNMATCHED,
+      };
+    }
 
-    const normalized = this.normalizePayload(payload);
+    return this.runSerializable(normalized);
+  }
 
-    return this.db.$transaction(async (tx: Prisma.TransactionClient) => {
+  private async ingestTransaction(
+    tx: Prisma.TransactionClient,
+    normalized: NormalizedSepayTransaction,
+  ): Promise<SepayWebhookResult> {
       const existing = await tx.sepayTransaction.findUnique({
-        where: { sepayTransactionId: normalized.sepayTransactionId },
+        where: { sepayTransactionId: normalized.externalId },
       });
 
       if (existing) {
@@ -58,16 +104,17 @@ export class SepayService {
             matchStatus: TransactionMatchStatus.WRONG_CODE,
             differenceAmount: null,
             matched: false,
-            reason: "SePay webhook did not contain a known payment code or order code",
+            applyStateChanges: false,
+            reason: "SePay transaction did not contain exactly one known payment code",
           };
 
 
       const transaction = await tx.sepayTransaction.create({
         data: {
-          sepayTransactionId: normalized.sepayTransactionId,
+          sepayTransactionId: normalized.externalId,
           paymentId: candidate?.id ?? null,
           transactionDate: normalized.transactionDate,
-          code: normalized.code,
+          code: normalized.paymentCode,
           content: normalized.content,
           amountIn: normalized.amountIn,
           referenceCode: normalized.referenceCode,
@@ -77,14 +124,7 @@ export class SepayService {
         },
       });
 
-      if (candidate) {
-        await tx.payment.update({
-          where: { id: candidate.id },
-          data: {
-            receivedAmount: normalized.amountIn,
-          },
-        });
-
+      if (candidate && classification.applyStateChanges) {
         const orderData: any = {};
         if (classification.paymentStatus) {
           orderData.paymentStatus = classification.paymentStatus as any;
@@ -98,10 +138,20 @@ export class SepayService {
 
         if (Object.keys(orderData).length > 0) {
           await tx.order.update({
-            where: { id: candidate.orderId },
+            where: {
+              id: candidate.orderId,
+              paymentMethod: candidate.order.paymentMethod,
+              paymentStatus: candidate.order.paymentStatus,
+              fulfillmentStatus: candidate.order.fulfillmentStatus,
+            },
             data: orderData,
           });
         }
+
+        await tx.payment.update({
+          where: { id: candidate.id, receivedAmount: candidate.receivedAmount },
+          data: { receivedAmount: normalized.amountIn },
+        });
 
         const historyRows = [];
         if (
@@ -154,7 +204,7 @@ export class SepayService {
           entityType: AuditEntityType.SEPAY_TRANSACTION,
           entityId: transaction.id,
           details: {
-            sepayTransactionId: normalized.sepayTransactionId.toString(),
+            sepayTransactionId: normalized.externalId,
             paymentId: transaction.paymentId,
             orderId: candidate?.orderId ?? null,
             amountIn: normalized.amountIn.toString(),
@@ -167,24 +217,53 @@ export class SepayService {
         },
       });
 
-      return {
-        duplicate: false,
-        matched: classification.matched,
-        transactionId: transaction.id,
-        paymentId: transaction.paymentId,
-        matchStatus: transaction.matchStatus,
-      };
-    });
+    return {
+      duplicate: false,
+      matched: classification.matched,
+      transactionId: transaction.id,
+      paymentId: transaction.paymentId,
+      matchStatus: transaction.matchStatus,
+    };
+  }
+
+  private async runSerializable(normalized: NormalizedSepayTransaction): Promise<SepayWebhookResult> {
+    for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.db.$transaction(
+          (tx) => this.ingestTransaction(tx, normalized),
+          { isolationLevel: "Serializable", maxWait: 5_000, timeout: 10_000 },
+        );
+      } catch (error) {
+        if (isExternalTransactionIdConflict(error)) {
+          const existing = await this.db.sepayTransaction.findUnique({
+            where: { sepayTransactionId: normalized.externalId },
+          });
+          if (existing) {
+            return {
+              duplicate: true,
+              matched: existing.matchStatus === TransactionMatchStatus.MATCHED,
+              transactionId: existing.id,
+              paymentId: existing.paymentId,
+              matchStatus: existing.matchStatus,
+            };
+          }
+        }
+        if (["P2025", "P2034"].includes(prismaErrorCode(error) ?? "")) {
+          if (attempt === SERIALIZABLE_ATTEMPTS) break;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw createHttpError(409, "SePay transaction could not be processed concurrently");
   }
 
   private verifyWebhook(headers: Record<string, any>) {
     const secret = process.env.SEPAY_WEBHOOK_API_KEY?.trim()
       || process.env.SEPAY_WEBHOOK_SECRET?.trim();
     if (!secret) {
-      if (process.env.NODE_ENV === "production") {
-        throw createHttpError(503, "SePay webhook API key is not configured");
-      }
-      return;
+      throw createHttpError(503, "SePay webhook API key is not configured");
     }
 
     const rawProvided =
@@ -205,53 +284,27 @@ export class SepayService {
     }
   }
 
-  private normalizePayload(payload: any) {
-    const sepayTransactionId = String(
-      payload.sepayTransactionId ??
-        payload.sepay_transaction_id ??
-        payload.transactionId ??
-        payload.transaction_id ??
-        payload.id
-    ).trim();
-
-    const amountIn = BigInt(
-      payload.amountIn ?? payload.amount_in ?? payload.transferAmount ?? payload.amount
-    );
-
-    const content = String(payload.content ?? payload.description ?? "");
-    const code = payload.code ? String(payload.code) : this.extractPaymentCode(content);
-    const referenceCode =
-      payload.referenceCode ?? payload.reference_code ?? payload.reference ?? null;
-    const dateValue =
-      payload.transactionDate ?? payload.transaction_date ?? payload.transferDate ?? null;
-
-    return {
-      sepayTransactionId,
-      amountIn,
-      content,
-      code,
-      referenceCode: referenceCode ? String(referenceCode) : null,
-      transactionDate: dateValue ? new Date(dateValue) : new Date(),
-      rawPayload: payload,
-    };
-  }
-
-  private extractPaymentCode(content: string): string | null {
-    const match = content.match(/PAY[A-Z0-9-]+/i);
-    return match ? match[0].toUpperCase() : null;
-  }
 
   private classifyCandidate(candidate: any, amountIn: bigint) {
     const differenceAmount = amountIn - candidate.expectedAmount;
 
-    if (candidate.order.fulfillmentStatus === FulfillmentStatus.CANCELLED) {
+    if (
+      candidate.order.paymentStatus === PaymentStatus.PAID
+      || [
+        FulfillmentStatus.PREPARING,
+        FulfillmentStatus.READY,
+        FulfillmentStatus.DELIVERED,
+        FulfillmentStatus.CANCELLED,
+      ].includes(candidate.order.fulfillmentStatus)
+    ) {
       return {
-        paymentStatus: PaymentStatus.REVIEW,
+        paymentStatus: null,
         fulfillmentStatus: null,
         matchStatus: TransactionMatchStatus.UNMATCHED,
         differenceAmount,
         matched: false,
-        reason: "SePay transaction arrived after order was cancelled",
+        applyStateChanges: false,
+        reason: "SePay transaction arrived after payment or fulfillment was settled",
       };
     }
 
@@ -262,6 +315,7 @@ export class SepayService {
         matchStatus: TransactionMatchStatus.UNMATCHED,
         differenceAmount,
         matched: false,
+        applyStateChanges: true,
         reason: "SePay transaction is underpaid",
       };
     }
@@ -273,6 +327,7 @@ export class SepayService {
         matchStatus: TransactionMatchStatus.UNMATCHED,
         differenceAmount,
         matched: false,
+        applyStateChanges: true,
         reason: "SePay transaction is overpaid",
       };
     }
@@ -288,6 +343,7 @@ export class SepayService {
         matchStatus: TransactionMatchStatus.MATCHED,
         differenceAmount,
         matched: true,
+        applyStateChanges: true,
         reason: "SePay webhook matched exact payment",
       };
     }
@@ -298,63 +354,31 @@ export class SepayService {
       matchStatus: TransactionMatchStatus.UNMATCHED,
       differenceAmount,
       matched: false,
+      applyStateChanges: false,
       reason: "SePay transaction needs manual payment review",
     };
   }
 
   private async findPaymentCandidate(
     tx: Prisma.TransactionClient,
-    normalized: ReturnType<SepayService["normalizePayload"]>
+    normalized: NormalizedSepayTransaction,
   ) {
-    const tokens = [normalized.code, normalized.content, normalized.referenceCode]
-      .filter(Boolean)
-      .map((value) => String(value));
-
-    for (const token of tokens) {
-      const byPaymentCode = await tx.payment.findFirst({
-        where: {
-          paymentCode: {
-            not: null,
-          },
-          OR: [
-            { paymentCode: token },
-            { paymentCode: { contains: token } },
-          ],
-        },
-        include: { order: true },
-      });
-
-      if (byPaymentCode) return byPaymentCode;
-
-      const byContent = await tx.payment.findFirst({
-        where: {
-          paymentCode: {
-            not: null,
-          },
-          OR: [
-            { paymentCode: { contains: token } },
-            { order: { orderCode: { contains: token } } },
-          ],
-        },
-        include: { order: true },
-      });
-
-      if (byContent) return byContent;
+    const tokens = new Set<string>();
+    for (const value of [normalized.paymentCode, normalized.content, normalized.referenceCode]) {
+      if (!value) continue;
+      const matches = value.toUpperCase().match(/[A-Z0-9]+(?:-[A-Z0-9]+)*/g) ?? [];
+      for (const token of matches) {
+        if (token.length <= 40) tokens.add(token);
+        if (tokens.size > 20) return null;
+      }
     }
+    if (tokens.size === 0) return null;
 
-    if (normalized.content) {
-      const payments = await tx.payment.findMany({
-        where: { paymentCode: { not: null } },
-        include: { order: true },
-      });
-
-      return payments.find(
-        (payment) =>
-          (payment.paymentCode && normalized.content.includes(payment.paymentCode)) ||
-          normalized.content.includes(payment.order.orderCode)
-      );
-    }
-
-    return null;
+    const payments = await tx.payment.findMany({
+      where: { paymentCode: { in: [...tokens] } },
+      include: { order: true },
+      take: 2,
+    });
+    return payments.length === 1 ? payments[0] : null;
   }
 }

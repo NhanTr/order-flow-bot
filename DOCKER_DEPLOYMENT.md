@@ -1,29 +1,41 @@
 # Order Flow container deployment
 
-The release consists of three project images plus the official Redis image:
+The release consists of three project images plus digest-pinned Redis and
+Caddy images:
 
 - `order-flow-backend`: API, Telegram Bot, notification worker, and database initializer.
 - `order-flow-frontend`: production Next.js standalone server.
 - `order-flow-postgres`: PostgreSQL 16 with the baseline Order Flow schema embedded.
-- `redis:7-alpine`: BullMQ storage for Telegram notifications.
+- Redis: API sessions/rate limits, BFF refresh coordination, and BullMQ data
+  separated by ACL users.
+- Caddy: the only public ingress and HTTPS termination point.
 
 The same backend image is started with different commands for the API, Bot, worker, and one-shot database initialization job. Images are published for both `linux/amd64` and `linux/arm64`.
 
 ## Run the published release
 
-The target machine only needs Docker Engine with Docker Compose. Copy `compose.yaml` and `.env.docker.example` into an empty directory, then:
+The target machine only needs Docker Engine with Docker Compose. Copy
+`compose.yaml`, `.env.docker.example`, and the repository `deploy/` directory
+into the same deployment directory, then:
 
 ```bash
 cp .env.docker.example .env.docker
 # Edit every replace-with-* value in .env.docker.
+# Set ORDER_FLOW_VERSION to the immutable sha-<commit> release tag.
 docker compose --env-file .env.docker pull
 docker compose --env-file .env.docker up -d
 docker compose --env-file .env.docker ps
 ```
 
-Open the Admin Web at `http://localhost:3000`. The API health endpoint is `http://localhost:3001/health`. Ports can be changed with `WEB_PORT`, `API_PORT`, and `BOT_WEBHOOK_PORT`.
+Open the configured `PUBLIC_ORIGIN`. Only Caddy publishes `HTTP_PORT` and
+`HTTPS_PORT`; API, Admin Web, Telegram Bot, PostgreSQL, and Redis remain on
+Docker networks. Production should use an HTTPS domain. For a loopback test,
+use `PUBLIC_ORIGIN=http://localhost` and a free `HTTP_PORT`.
 
-`db-init` is expected to finish with exit code 0. It creates or refreshes only the configured OWNER login. PostgreSQL initializes the schema only when its named volume is empty. Normal restarts preserve data in `postgres_data` and Redis state in `redis_data`.
+`db-init` is expected to finish with exit code 0. It applies the rerunnable
+security migration, creates least-privilege API/worker roles, and creates or
+refreshes only the configured OWNER login. PostgreSQL initializes the baseline
+schema only when its named volume is empty. Normal restarts preserve data.
 
 Useful operations:
 
@@ -36,11 +48,20 @@ docker compose --env-file .env.docker down
 
 `docker compose down` keeps data. `docker compose down -v` permanently deletes the PostgreSQL and Redis volumes and must only be used when a clean database is intended.
 
-Telegram uses long polling when `TELEGRAM_WEBHOOK_DOMAIN` is empty. For webhook mode, put a TLS reverse proxy in front of port 3002 of the `telegram-bot` service and set the three webhook variables. In production, also put the public web/API ports behind an HTTPS reverse proxy.
+Telegram uses long polling when `TELEGRAM_WEBHOOK_DOMAIN` is empty. In webhook
+mode, Caddy routes the configured Telegram path. Caddy also routes the explicit
+SePay webhook path directly to the API; all browser traffic passes through the
+Next.js BFF.
+
+Credential separation, upgrade order, TLS verification, backup/restore, and
+rollback steps are documented in
+`backend/docs/security-operations.md`.
 
 ## Publish images to GHCR
 
-The workflow `.github/workflows/publish-containers.yml` publishes all three images when a version tag is pushed:
+The workflow `.github/workflows/publish-containers.yml` publishes all three
+images when a version tag is pushed, after the same commit passes
+`.github/workflows/security-checks.yml`:
 
 ```bash
 git tag v1.0.0
@@ -74,4 +95,6 @@ ORDER_FLOW_IMAGE_PREFIX=order-flow
 ORDER_FLOW_VERSION=local
 ```
 
-For a release smoke test, verify that `db-init` exits successfully, all five long-running services are healthy/running, the OWNER can sign in, and the Bot can answer `/start`.
+For a release smoke test, verify that `redis-init` and `db-init` exit
+successfully, all long-running services are healthy, only Caddy exposes host
+ports, the OWNER can sign in, and the Bot can answer `/start`.

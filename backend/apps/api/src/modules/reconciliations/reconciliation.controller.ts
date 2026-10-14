@@ -1,6 +1,8 @@
 import { NextFunction, Request, Response } from "express";
+import { requireOwnerActor } from "../auth/auth.middleware";
 import { ReconciliationService } from "./reconciliation.service";
 import { validateResolveReconciliation } from "./reconciliation.validation";
+import { parsePagination } from "../../middleware/pagination";
 
 type TransactionParams = { transactionId: string };
 type ReconciliationParams = { reconciliationId: string };
@@ -8,9 +10,9 @@ type ReconciliationParams = { reconciliationId: string };
 export class ReconciliationController {
   constructor(private readonly service: ReconciliationService) {}
 
-  public listTransactions = async (_req: Request, res: Response, next: NextFunction) => {
+  public listTransactions = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.status(200).json({ data: await this.service.listTransactions() });
+      res.status(200).json(await this.service.listTransactions(parsePagination(req.query)));
     } catch (err) {
       next(err);
     }
@@ -28,9 +30,9 @@ export class ReconciliationController {
     }
   };
 
-  public listReconciliations = async (_req: Request, res: Response, next: NextFunction) => {
+  public listReconciliations = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.status(200).json({ data: await this.service.listReconciliations() });
+      res.status(200).json(await this.service.listReconciliations(parsePagination(req.query)));
     } catch (err) {
       next(err);
     }
@@ -54,14 +56,19 @@ export class ReconciliationController {
     next: NextFunction
   ) => {
     try {
-      const v = validateResolveReconciliation(req.body);
+      const actor = requireOwnerActor(req);
+      const input = {
+        ...req.body,
+        resolvedByUserId: actor.userId,
+      };
+      const v = validateResolveReconciliation(input);
       if (!v.isValid) {
         res.status(400).json({ message: "Validation failed", errors: v.errors });
         return;
       }
 
       res.status(200).json(
-        await this.service.resolveReconciliation(req.params.reconciliationId, req.body)
+        await this.service.resolveReconciliation(req.params.reconciliationId, input)
       );
     } catch (err) {
       next(err);

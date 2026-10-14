@@ -1,13 +1,16 @@
 import "./config/load-env";
 
 import express, { type Application } from "express";
+import helmet from "helmet";
+import { createClient } from "redis";
 import { createSepayRouter } from "./modules/sepay/sepay.routes";
 
 import { createDatabasePool } from "./config/database.js";
 import { getEnv } from "./config/env.js";
 import { errorHandler, notFound, requestId } from "./middleware/index.js";
+import { createSecurityLimiters, type SecurityLimiters } from "./middleware/rate-limit.js";
 import { AuthRepository } from "./modules/auth/auth.repository.js";
-import { MemoryAuthSessionStore } from "./modules/auth/auth-session.store.js";
+import { RedisAuthSessionStore } from "./modules/auth/redis-auth-session.store.js";
 import { AuthService, type AuthServicePort } from "./modules/auth/auth.service.js";
 import { AuthTokenService } from "./modules/auth/auth.tokens.js";
 import {
@@ -56,6 +59,7 @@ export function createApp(options: CreateAppOptions = {}): Application {
   let categoryService = options.categoryService;
   let itemService = options.itemService;
   let telegramBotSession = options.telegramBotSession ?? options.telegramSession;
+  let securityLimiters: SecurityLimiters | undefined;
   let dispose = async () => undefined;
   const botOnly =
     !authService &&
@@ -64,7 +68,22 @@ export function createApp(options: CreateAppOptions = {}): Application {
   if (!authService && !botOnly) {
     const env = getEnv();
     const pool = createDatabasePool(env);
-    const sessions = new MemoryAuthSessionStore(env.AUTH_SESSION_CACHE_MAX);
+    const redisClient = createClient({
+      url: env.REDIS_URL,
+      disableOfflineQueue: true,
+      socket: {
+        connectTimeout: 2_000,
+        reconnectStrategy: (retries) => Math.min(100 * 2 ** retries, 2_000),
+      },
+    });
+    redisClient.on("error", () => undefined);
+    void redisClient.connect().catch(() => undefined);
+    const sessions = new RedisAuthSessionStore(redisClient);
+    securityLimiters = createSecurityLimiters(redisClient, {
+      proxySecret: env.API_PROXY_SECRET,
+      trustProxyHops: env.TRUST_PROXY_HOPS,
+    });
+    app.set("trust proxy", env.TRUST_PROXY_HOPS);
     authService = new AuthService(
       new AuthRepository(pool),
       sessions,
@@ -78,18 +97,25 @@ export function createApp(options: CreateAppOptions = {}): Application {
       telegramBotSession = { internalSecret: env.BOT_INTERNAL_SECRET };
     }
     dispose = async () => {
-      sessions.clear();
+      if (redisClient.isOpen) redisClient.destroy();
       await pool.end();
     };
   }
 
   app.locals.dispose = dispose;
   app.use(requestId);
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.set("json replacer", (_key: string, value: unknown) =>
     typeof value === "bigint" ? value.toString() : value,
   );
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true }));
+  if (securityLimiters) {
+    app.use(securityLimiters.clientIdentity);
+    app.use("/api/v1/admin/auth/login", securityLimiters.loginIp, securityLimiters.loginAccount);
+    app.use("/api/v1/admin/auth/refresh", securityLimiters.refreshIp);
+    app.use("/api/v1/telegram/session", securityLimiters.telegramIp);
+  }
 
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "order-flow-api" });
@@ -138,6 +164,8 @@ export function createApp(options: CreateAppOptions = {}): Application {
       employeeService,
       categoryService,
       itemService,
+      {},
+      securityLimiters,
     ));
   }
   app.use("/api/v1", apiV1);

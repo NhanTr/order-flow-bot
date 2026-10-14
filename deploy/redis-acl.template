@@ -1,0 +1,6 @@
+# Reference ACL policy. deploy/redis-init.sh applies the same rules with
+# passwords supplied at runtime; never replace placeholders in a tracked file.
+user default off
+user order_flow_api on >${REDIS_API_PASSWORD} resetkeys ~order-flow:auth-session:v1:* ~order-flow:security:v1:* +@connection +@read +@write +@scripting
+user order_flow_bff on >${REDIS_BFF_PASSWORD} resetkeys ~order-flow:bff-refresh:v1:* +@connection +@read +@write +@scripting
+user order_flow_worker on >${REDIS_WORKER_PASSWORD} resetkeys ~bull:telegram-notifications:* +@all -acl -config -debug -shutdown -flushall -flushdb -keys

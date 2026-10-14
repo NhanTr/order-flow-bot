@@ -1,0 +1,33 @@
+meta {
+  name: updateMenuItem
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/admin/menu-items/{{menuItemId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Updated Bruno Coffee",
+    "price": 35000
+  }
+}
+
+docs {
+  Partially update a menu item
+
+  Source: backend/docs/openapi.yaml
+
+}

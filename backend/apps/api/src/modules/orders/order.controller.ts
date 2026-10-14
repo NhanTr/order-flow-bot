@@ -5,8 +5,15 @@ import {
   validateAddItem,
   validateUpdateItem,
   validateCancelOrder,
+  validateReadyOrder,
+  validateDeliverOrder,
 } from "./order.validation";
 import { OrderFilters, FulfillmentStatus, PaymentStatus } from "./order.types";
+import {
+  requireAuthenticatedActor,
+  requireOwnerActor,
+} from "../auth/auth.middleware";
+import { parsePagination } from "../../middleware/pagination";
 
 /**
  * Handles all HTTP requests for /api/v1/orders endpoints.
@@ -21,7 +28,10 @@ export class OrderController {
       const v = validateCreateOrder(req.body);
       if (!v.isValid) { res.status(400).json({ message: "Validation failed", errors: v.errors }); return; }
 
-      const order = await this.orderService.createOrder(req.body);
+      const order = await this.orderService.createOrder(
+        req.body,
+        requireAuthenticatedActor(req),
+      );
       res.status(201).json(order);
     } catch (err) { next(err); }
   };
@@ -30,15 +40,16 @@ export class OrderController {
   // Query: fulfillmentStatus, paymentStatus, createdByUserId, assignedBaristaId, page, limit
   public listOrders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const { page, limit } = parsePagination(req.query);
       const filters: OrderFilters = {
         fulfillmentStatus: req.query.fulfillmentStatus as FulfillmentStatus | undefined,
         paymentStatus:     req.query.paymentStatus     as PaymentStatus     | undefined,
         createdByUserId:   req.query.createdByUserId   as string | undefined,
         assignedBaristaId: req.query.assignedBaristaId as string | undefined,
-        page:  req.query.page  ? parseInt(req.query.page  as string, 10) : 1,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
+        page,
+        limit,
       };
-      const result = await this.orderService.getOrders(filters);
+      const result = await this.orderService.getOrders(filters, requireAuthenticatedActor(req));
       res.status(200).json(result);
     } catch (err) { next(err); }
   };
@@ -46,7 +57,10 @@ export class OrderController {
   // GET /api/v1/orders/:orderId
   public getOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const order = await this.orderService.getOrderById(String(req.params.orderId));
+      const order = await this.orderService.getOrderById(
+        String(req.params.orderId),
+        requireAuthenticatedActor(req),
+      );
       res.status(200).json(order);
     } catch (err) { next(err); }
   };
@@ -61,7 +75,7 @@ export class OrderController {
       const order = await this.orderService.addItem(
         String(req.params.orderId),
         req.body,
-        req.body.requesterId
+        requireAuthenticatedActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -77,7 +91,8 @@ export class OrderController {
       const order = await this.orderService.updateItem(
         String(req.params.orderId),
         String(req.params.itemId),
-        req.body
+        req.body,
+        requireAuthenticatedActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -88,7 +103,8 @@ export class OrderController {
     try {
       const order = await this.orderService.deleteItem(
         String(req.params.orderId),
-        String(req.params.itemId)
+        String(req.params.itemId),
+        requireAuthenticatedActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -104,7 +120,7 @@ export class OrderController {
       const order = await this.orderService.cancelOrder(
         String(req.params.orderId),
         req.body.reason,
-        req.body.requesterId
+        requireAuthenticatedActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -118,7 +134,8 @@ export class OrderController {
 
       const order = await this.orderService.claimOrder(
         String(req.params.orderId),
-        req.body.baristaId
+        req.body.baristaId,
+        requireOwnerActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -128,15 +145,13 @@ export class OrderController {
   // The acting user is derived from the authenticated admin session.
   public markReady = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const requesterId = req.auth?.userId;
-      if (!requesterId) {
-        res.status(401).json({ message: "Authenticated user is required" });
-        return;
-      }
+      const v = validateReadyOrder(req.body);
+      if (!v.isValid) { res.status(400).json({ message: "Validation failed", errors: v.errors }); return; }
 
       const order = await this.orderService.markReady(
         String(req.params.orderId),
-        requesterId
+        req.body?.reason,
+        requireOwnerActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }
@@ -146,15 +161,13 @@ export class OrderController {
   // The acting user is derived from the authenticated admin session.
   public deliverOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const requesterId = req.auth?.userId;
-      if (!requesterId) {
-        res.status(401).json({ message: "Authenticated user is required" });
-        return;
-      }
+      const v = validateDeliverOrder(req.body);
+      if (!v.isValid) { res.status(400).json({ message: "Validation failed", errors: v.errors }); return; }
 
       const order = await this.orderService.deliverOrder(
         String(req.params.orderId),
-        requesterId
+        req.body?.reason,
+        requireAuthenticatedActor(req),
       );
       res.status(200).json(order);
     } catch (err) { next(err); }

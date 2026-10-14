@@ -1,0 +1,43 @@
+meta {
+  name: createEmployee
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/employees
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "fullName": "Bruno Service Staff",
+    "telegramUserId": "{{staffTelegramUserId}}",
+    "role": "SERVICE_STAFF"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const payload = res.getBody();
+    const data = payload.data ?? payload;
+    const value = data.id;
+    if (value) bru.setVar("employeeId", value);
+  }
+}
+
+docs {
+  Create an employee
+
+  Source: backend/docs/openapi.yaml
+
+}

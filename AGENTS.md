@@ -11,6 +11,8 @@ order-flow/
 ├── AGENTS.md                         # This persistent project map
 ├── compose.yaml                      # Pull-and-run production container stack
 ├── DOCKER_DEPLOYMENT.md              # Container publishing and operator guide
+├── deploy/                           # Caddy ingress and Redis ACL bootstrap
+├── INSTALLATION.md                   # GitHub clone-to-running local installation guide
 ├── package.json                      # Root process runner (`npm run live`)
 ├── SWIFT_MOBILE_APP_SPEC.md          # OWNER-only, read-only Swift manager dashboard contract
 ├── frontend/                         # Next.js Admin Web Application
@@ -24,8 +26,10 @@ order-flow/
     ├── docker-compose.yml            # Local PostgreSQL 16 service
     ├── Dockerfile                    # Shared API/Bot/worker/init production image
     ├── Dockerfile.postgres           # PostgreSQL image with baseline schema
+    ├── bruno/                        # Native Bruno collection, Local environment and API testing guide
     ├── docs/
     │   ├── api-contract.md           # Planned HTTP route inventory
+    │   ├── security-operations.md    # Credential, migration, backup and rollback runbook
     │   └── openapi.yaml              # Importable Postman/OpenAPI contract for all routes
     ├── apps/
     │   ├── api/                      # HTTP API service
@@ -51,7 +55,8 @@ order-flow/
     │   └── eslint-config/             # Shared ESLint configuration
     └── prisma/
         ├── schema.prisma              # PostgreSQL Prisma schema
-        ├── seed.ts                    # Idempotent initial OWNER seed entry point
+        ├── seed.ts                    # OWNER initialization and shared three-role demo seeds
+        ├── seeds/shared-users.seed.ts # Shared OWNER/staff/barista identities; env-only bcrypt password
         ├── seed-visualization.ts      # Large local-Docker dataset; reuses existing users
         └── sync-users-to-docker.ts    # Safe Supabase users → local Docker upsert
 ```
@@ -76,6 +81,9 @@ All module directories are under `backend/apps/api/src/modules/`:
 ## Current implementation state
 
 - The complete application can run from published Docker images through root `compose.yaml`: PostgreSQL, Redis, one-shot OWNER initialization, API, Admin Web, Telegram Bot and notification worker. GHCR release automation builds both AMD64 and ARM64 images.
+- The Admin Web uses a same-origin Next.js BFF with an explicit business-route allowlist, Origin checks for cookie-authenticated mutations, trusted proxy identity headers, bounded upstream timeouts and Redis-coordinated refresh-token single-flight. OWNER pages remain owner-only; SERVICE_STAFF can use only their own order workflow; BARISTA remains Telegram-only.
+- API authentication sessions and distributed request limits share Redis with separate namespaces. Production has no in-memory authentication fallback; Redis failures fail closed with 503. BFF and API require a distinct `API_PROXY_SECRET`, and sensitive/session responses are marked `no-store`.
+- Production Compose exposes only the Caddy HTTPS ingress. API and notification worker use separate non-superuser PostgreSQL roles; API, BFF and BullMQ use separate Redis ACL users. The one-shot initializer applies rerunnable migrations and grants with the administrative database credential.
 - The API is an Express app with Telegram employee-session authentication, order lifecycle, barista, admin, payment, SePay, reconciliation, refund, revenue report, audit and order-status-history modules. Its routes are mounted beneath `/api/v1`.
 - OWNER-authenticated `GET /api/v1/admin/dashboard` returns live PostgreSQL aggregates, status counts, revenue buckets, recent orders and payment alerts for the requested 1–90 day range.
 - The root `npm run live` command uses `concurrently` to run the API, Admin Web, Telegram Bot and notification worker in one terminal.
@@ -93,6 +101,21 @@ All module directories are under `backend/apps/api/src/modules/`:
 - The staff `Kiểm tra thanh toán` action actively queries SePay API v2 as a webhook-recovery path, requiring `SEPAY_API_TOKEN` and an environment-specific `SEPAY_API_BASE_URL`; Live and Test Mode/Sandbox tokens are isolated. Numeric API v1 and UUID API v2 transaction IDs share the same string idempotency column.
 - The experimental voice-order handler can download a Telegram voice message and invoke a configured Hermes-compatible command bridge; it is disabled unless `VOICE_ORDER_SCRIPT` is configured.
 
+## Progress log — 2026-10-14
+
+- Added production least-privilege PostgreSQL roles, Redis ACL bootstrap, Caddy-only ingress, remote database verify-full enforcement, container hardening, dependency/secret/image CI gates, and a disposable backup-restore rehearsal.
+- Hardened the Admin Web permission/session boundary: actor IDs were removed from browser mutations, list consumers now traverse bounded 100-row pages, BFF routes are allowlisted and same-origin protected, and concurrent refreshes are coordinated through short-lived hashed Redis keys.
+- Integrated Redis-backed account/IP/user/export throttles and Helmet into the API application with trusted-proxy handling. Added frontend security unit/integration coverage and production-compatible security headers.
+- Replaced process-local API authentication sessions with Redis TTL records and
+  atomic Lua refresh-token rotation. Sessions are shared across API instances;
+  Redis failures return 503 without an in-memory fallback. JWT verification now
+  requires HS256, issuer `order-flow`, and audience `order-flow-api`.
+
+## Progress log — 2026-10-13
+
+- Added `seed:users` and a shared identity seed for one OWNER, one SERVICE_STAFF and one BARISTA on an empty database. All user-producing demo seeds reuse those accounts; old/unrelated users are not deleted.
+- Removed fixed demo passwords and the extra inactive staff fixture. OWNER passwords require at least 12 characters from environment configuration; seed results/logs exclude password/hash and CLI errors are sanitized. Bruno credentials use Secret variables.
+
 ## Progress log — 2026-08-16
 
 - Added production multi-stage Docker images for the shared backend runtime and standalone Next.js frontend, plus a PostgreSQL 16 image that initializes the full baseline schema.
@@ -101,8 +124,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 ## Progress log — 2026-08-14
 
-- Added three OWNER report exports to the revenue page: an accounting-oriented XLSX, a 04/TNDN revenue-method DOCX, and a 03/TNDN revenue-expense DOCX.
-- DOCX exports retain the two source templates in `backend/docs`, fill revenue from PostgreSQL, and require the user to confirm tax identity, rate, expense and adjustment inputs that Order Flow does not store.
+- The OWNER revenue page exports one accounting-oriented XLSX. The former 03/04-TNDN DOCX exports were removed because their required source templates were not part of the repository.
 - XLSX export provides summary, issue register, order/Payment/SePay/refund detail, journal and daily reconciliation sheets. Formula-driven checks reconcile order totals, expected/received amounts, bank transactions and cumulative refunds; colored bold cells and comments identify each exception and remediation. The workbook retains an explicit scope note for missing VAT/input-invoice/expense data.
 
 ## Progress log — 2026-08-12
@@ -130,7 +152,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 - Added a deterministic, rerunnable visualization seed that targets only the PostgreSQL database exposed by local Docker, covering menu, orders, order items, payments, status history and historical notifications across a configurable time range.
 - The visualization seed uses a dedicated localhost Docker PostgreSQL URL instead of the normal Supabase environment URL, never writes `users`, requires existing active SERVICE_STAFF and BARISTA records, and refuses production/remote database targets.
-- Removed the local Redis service from Docker Compose; auth session caching remains process-local, while the optional BullMQ notification worker requires an externally supplied Redis service if used.
+- The earlier local PostgreSQL-only Compose file omitted Redis; the root production Compose stack now supplies Redis for shared authentication sessions and the BullMQ notification worker.
 - Added a guarded, non-destructive users-only sync from Supabase into local Docker PostgreSQL; it preserves UUIDs and refuses unique identity conflicts.
 - Usage and verification queries are documented in `backend/docs/visualization-seed.md`.
 - Removed the local realtime Order Simulator and its dedicated API scripts; test data remains available through the Docker-only visualization seed.
@@ -160,7 +182,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 - `feat-tele` implements the internal Bot session against `public.users`, now exposed separately at `POST /api/v1/telegram/bot/session`, including internal-secret authentication, active-state enforcement, role mapping and Bot response validation.
 - Verified locally for KHOA-002: API auth checks and 11 tests pass; Bot type-check/build and 32 tests pass.
 
-- `apps/api` is a runnable Express service; the auth module implements admin JWT sessions and verified Telegram Web App sessions. Session state is held by a bounded process-local memory cache in `auth-session.store.ts`.
+- `apps/api` is a runnable Express service; the auth module implements admin JWT sessions and verified Telegram Web App sessions. Production session state is held in Redis with TTL and atomic refresh rotation; `MemoryAuthSessionStore` is an explicit test/local adapter.
 - Employee and menu modules are developed on dedicated feature branches; shared packages remain placeholders kept by `.gitkeep` files.
 - `schema.prisma` configures Prisma Client and PostgreSQL through pooled `DATABASE_URL` plus migration `DIRECT_URL`; it currently defines the initial `User`, `Order`, and `OrderItem` models and related enums.
 - `seed.ts` creates or refreshes the initial active `OWNER` from `SEED_OWNER_*`
@@ -179,6 +201,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 ## Navigation shortcuts
 
+- Security hardening planning: start at `docs/superpowers/plans/2026-10-13-security-hardening.md`; the shared specification and seven agent packets define permissions, ownership, dependencies and acceptance checks. These are plans, not completed security fixes.
 - API work: start at `backend/apps/api/src/` and the relevant `modules/<domain>/` folder.
 - Telegram work: start at `backend/apps/telegram-bot/src/`.
 - Telegram callback protocol and replay guards: start at `backend/apps/telegram-bot/src/callbacks/`.
@@ -187,11 +210,13 @@ All module directories are under `backend/apps/api/src/modules/`:
 - Cross-application contracts/constants: use `backend/packages/shared-types/` and `backend/packages/shared-constants/`.
 - Local database infrastructure: use `backend/docker-compose.yml`.
 - Planned API routes: read `backend/docs/api-contract.md` before implementing handlers.
+- Bruno API testing: open `backend/bruno/` as a collection; read `backend/bruno/README.md` for authentication and Telegram flows.
 - Postman/API generation: import `backend/docs/openapi.yaml`; keep it synchronized with route behavior and `api-contract.md`.
 - Swift mobile work: start at `SWIFT_MOBILE_APP_SPEC.md`; the MVP is an OWNER-only, read-only manager dashboard and explicitly excludes service-staff/Barista actions.
-- Auth session storage: use `backend/apps/api/src/modules/auth/auth-session.store.ts`; restart clears sessions and multi-instance deployments require a shared replacement such as Redis.
+- Auth session storage: use `backend/apps/api/src/modules/auth/auth-session.store.ts` for the asynchronous port and `redis-auth-session.store.ts` for production. Redis sessions survive individual API restarts and are shared across instances.
 - Telegram authentication: Web App JWT flow is registered in `backend/apps/api/src/modules/auth/auth.routes.ts`; internal Bot employee resolution is implemented in `telegram-session.routes.ts` and mounted at `/api/v1/telegram/bot/session` from `apps/api/src/app.ts`.
 - Environment variable names/templates: use the root `.env.example`; never commit `.env.local`.
+- New-contributor local setup: use root `INSTALLATION.md` for Docker PostgreSQL/Redis, seed, app and Bruno steps.
 
 ## Installed GitHub skills
 

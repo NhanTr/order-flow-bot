@@ -107,7 +107,7 @@ frontend/
 
 ```
 Trình duyệt (client component)
-   │  fetch("/api/backend/admin/orders?limit=500")
+   │  fetch("/api/backend/admin/orders?page=1&limit=100")
    ▼
 Next.js API Route  src/app/api/backend/[...path]/route.ts   (chạy phía SERVER)
    │  đọc cookie, thêm header Authorization: Bearer <accessToken>
@@ -120,8 +120,12 @@ PostgreSQL  (qua Prisma)
 
 ### Điểm chính của proxy (`route.ts`):
 - Build URL đích: `${API_BASE_URL}/${path.join("/")}${search}` với `API_BASE_URL` mặc định `http://127.0.0.1:3001/api/v1` (xem `server-api.ts`).
+- Chỉ cho phép các business route đã định nghĩa; route login/logout có handler riêng và refresh token không thể gọi qua catch-all.
+- POST/PUT/PATCH/DELETE bắt buộc có `Origin` khớp chính xác `PUBLIC_ORIGIN` trước khi gọi backend.
+- Header client IP do trình duyệt gửi bị loại bỏ. BFF chỉ gửi IP đã lấy từ trusted ingress cùng `API_PROXY_SECRET` riêng.
 - **Tự thêm token**: lấy accessToken/refreshToken từ cookie httpOnly rồi gắn `Authorization: Bearer`.
-- **Tự refresh token**: nếu backend trả `401` và có refreshToken → gọi `POST /admin/auth/refresh` của backend → lấy token mới → **gửi lại request** → set cookie mới.
+- **Tự refresh token**: nếu backend trả `401`, Redis single-flight bảo đảm các BFF instance chỉ rotate refresh token một lần; kết quả được chia sẻ tối đa 10 giây trong namespace chỉ BFF được đọc.
+- Timeout upstream là 15 giây; riêng export báo cáo là 60 giây. Response phiên và dữ liệu nhạy cảm luôn có `Cache-Control: no-store`.
 - Nếu backend không chạy → trả `503` "API backend chưa sẵn sàng".
 - Forward mọi method: GET/POST/PATCH/PUT/DELETE.
 
@@ -203,7 +207,7 @@ PostgreSQL  (qua Prisma)
 - `inPeriod()` kiểm tra 1 mốc thời gian có nằm trong kỳ không (`""` = tất cả).
 
 ### `lib/server-api.ts` — Chỉ chạy phía server (route API của Next)
-- Khai báo tên cookie, `API_BASE_URL`, và 3 hàm: `setSessionCookies`, `clearSessionCookies`, `readSessionTokens`. Dùng bởi các route `api/auth/login|logout` và proxy `/api/backend`.
+- Khai báo cookie, `API_BASE_URL`, `PUBLIC_ORIGIN`, `API_PROXY_SECRET`, cấu hình trusted proxy và các hàm quản lý session. `session-refresh.ts` quản lý Redis single-flight; các biến này tuyệt đối không dùng tiền tố `NEXT_PUBLIC_`.
 
 ---
 
@@ -284,7 +288,7 @@ Mọi trang admin đều là **client component** (`"use client"`) nằm trong n
 
 **Đối soát (`/reconciliations`):**
 - Map `toReconciliation`: phân loại 5 loại (matched/underpaid/overpaid/unknown_code/duplicate).
-- Hành động resolve: ACCEPT / REJECT / REFUND_REQUIRED / LINK_MANUALLY / NONE → gọi `resolveReconciliation` (cần `resolvedByUserId` = admin hiện tại).
+- Hành động resolve: ACCEPT / REJECT / REFUND_REQUIRED / LINK_MANUALLY / NONE → gọi `resolveReconciliation`; backend lấy người xử lý từ JWT đã xác thực.
 
 **Barista (`/barista`):**
 - Chọn Barista (active) → xem hàng đợi QUEUED + đơn đang xử lý của barista đó.

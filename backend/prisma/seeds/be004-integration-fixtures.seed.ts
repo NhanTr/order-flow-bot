@@ -4,50 +4,12 @@ import {
   PaymentMethod,
   PaymentStatus,
   PrismaClient,
-  UserRole,
-  UserStatus,
 } from "@prisma/client";
-import { hash } from "bcryptjs";
+import { seedSharedUsers } from "./shared-users.seed";
 
-const passwordRounds = 10;
-const devOnlyPassword = "be004-dev-password";
 const paidAt = new Date("2026-08-04T00:00:00.000Z");
 
 const fixtures = {
-  users: {
-    owner: {
-      id: "00000000-0000-4000-8000-000000004001",
-      fullName: "BE004 Owner Manager",
-      username: "be004_owner",
-      telegramUserId: BigInt(94004001),
-      role: UserRole.OWNER,
-      status: UserStatus.ACTIVE,
-    },
-    serviceStaff: {
-      id: "00000000-0000-4000-8000-000000004002",
-      fullName: "BE004 Service Staff",
-      username: "be004_service_staff",
-      telegramUserId: BigInt(94004002),
-      role: UserRole.SERVICE_STAFF,
-      status: UserStatus.ACTIVE,
-    },
-    barista: {
-      id: "00000000-0000-4000-8000-000000004003",
-      fullName: "BE004 Barista",
-      username: "be004_barista",
-      telegramUserId: BigInt(94004003),
-      role: UserRole.BARISTA,
-      status: UserStatus.ACTIVE,
-    },
-    inactiveStaff: {
-      id: "00000000-0000-4000-8000-000000004004",
-      fullName: "BE004 Inactive Staff",
-      username: "be004_inactive_staff",
-      telegramUserId: BigInt(94004004),
-      role: UserRole.SERVICE_STAFF,
-      status: UserStatus.INACTIVE,
-    },
-  },
   menu: {
     activeCategory: {
       id: "00000000-0000-4000-8000-000000004101",
@@ -92,43 +54,7 @@ const fixtures = {
 } as const;
 
 export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promise<void> {
-  const ownerPasswordHash = await hash(devOnlyPassword, passwordRounds);
-
-  await prisma.user.upsert({
-    where: { id: fixtures.users.owner.id },
-    create: {
-      ...fixtures.users.owner,
-      passwordHash: ownerPasswordHash,
-    },
-    update: {
-      fullName: fixtures.users.owner.fullName,
-      telegramUserId: fixtures.users.owner.telegramUserId,
-      username: fixtures.users.owner.username,
-      passwordHash: ownerPasswordHash,
-      role: fixtures.users.owner.role,
-      status: fixtures.users.owner.status,
-    },
-  });
-
-  await Promise.all(
-    [fixtures.users.serviceStaff, fixtures.users.barista, fixtures.users.inactiveStaff].map((user) =>
-      prisma.user.upsert({
-        where: { id: user.id },
-        create: {
-          ...user,
-          passwordHash: null,
-        },
-        update: {
-          fullName: user.fullName,
-          telegramUserId: user.telegramUserId,
-          username: user.username,
-          role: user.role,
-          status: user.status,
-          passwordHash: null,
-        },
-      }),
-    ),
-  );
+  const { owner, serviceStaff, barista } = await seedSharedUsers(prisma);
 
   const activeCategory = await prisma.menuCategory.upsert({
     where: { id: fixtures.menu.activeCategory.id },
@@ -188,7 +114,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
     create: {
       id: fixtures.orders.queued.id,
       orderCode: fixtures.orders.queued.orderCode,
-      createdByUserId: fixtures.users.serviceStaff.id,
+      createdByUserId: serviceStaff.id,
       paymentMethod: PaymentMethod.CASH,
       paymentStatus: PaymentStatus.PAID,
       fulfillmentStatus: FulfillmentStatus.QUEUED,
@@ -198,7 +124,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
     },
     update: {
       orderCode: fixtures.orders.queued.orderCode,
-      createdByUserId: fixtures.users.serviceStaff.id,
+      createdByUserId: serviceStaff.id,
       assignedBaristaId: null,
       paymentMethod: PaymentMethod.CASH,
       paymentStatus: PaymentStatus.PAID,
@@ -239,7 +165,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
       paymentCode: fixtures.orders.queued.paymentCode,
       expectedAmount: queuedTotal,
       receivedAmount: queuedTotal,
-      cashConfirmedByUserId: fixtures.users.owner.id,
+      cashConfirmedByUserId: owner.id,
       confirmedAt: paidAt,
     },
     update: {
@@ -247,7 +173,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
       paymentCode: fixtures.orders.queued.paymentCode,
       expectedAmount: queuedTotal,
       receivedAmount: queuedTotal,
-      cashConfirmedByUserId: fixtures.users.owner.id,
+      cashConfirmedByUserId: owner.id,
       confirmedAt: paidAt,
     },
   });
@@ -269,7 +195,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
         statusDomain: OrderStatusDomain.PAYMENT,
         oldStatus: PaymentStatus.UNPAID,
         newStatus: PaymentStatus.PAID,
-        changedByUserId: fixtures.users.owner.id,
+        changedByUserId: owner.id,
         reason: "BE004 fixture payment status",
         createdAt: paidAt,
       },
@@ -293,7 +219,7 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
         statusDomain: OrderStatusDomain.FULFILLMENT,
         oldStatus: FulfillmentStatus.PENDING_PAYMENT,
         newStatus: FulfillmentStatus.QUEUED,
-        changedByUserId: fixtures.users.owner.id,
+        changedByUserId: owner.id,
         reason: "BE004 fixture fulfillment status",
         createdAt: paidAt,
       },
@@ -303,11 +229,10 @@ export async function seedBe004IntegrationFixtures(prisma: PrismaClient): Promis
   console.info(
     {
       users: {
-        ownerUsername: fixtures.users.owner.username,
-        ownerTelegramUserId: fixtures.users.owner.telegramUserId.toString(),
-        serviceStaffTelegramUserId: fixtures.users.serviceStaff.telegramUserId.toString(),
-        baristaTelegramUserId: fixtures.users.barista.telegramUserId.toString(),
-        inactiveStaffTelegramUserId: fixtures.users.inactiveStaff.telegramUserId.toString(),
+        ownerUsername: owner.username,
+        ownerTelegramUserId: owner.telegramUserId?.toString(),
+        serviceStaffTelegramUserId: serviceStaff.telegramUserId?.toString(),
+        baristaTelegramUserId: barista.telegramUserId?.toString(),
       },
       menu: {
         activeCategory: fixtures.menu.activeCategory.name,

@@ -1,7 +1,6 @@
-import { PrismaClient, UserRole, UserStatus } from "@prisma/client";
-import { hash } from "bcryptjs";
+import { PrismaClient } from "@prisma/client";
 
-import { getSeedConfig } from "../apps/api/src/config/seed.config.js";
+import { seedInitialOwner, seedSharedUsers } from "./seeds/shared-users.seed";
 import { seedBe004IntegrationFixtures } from "./seeds/be004-integration-fixtures.seed";
 import { seedThai001CashPayment } from "./seeds/thai001-cash-payment.seed";
 import { seedThai002QrPayment } from "./seeds/thai002-qr-payment.seed";
@@ -15,51 +14,18 @@ import { seedSmallShopMenu } from "./seeds/small-shop-menu.seed";
 
 const prisma = new PrismaClient();
 
-async function seedOwner(): Promise<void> {
-  const config = getSeedConfig();
-  const existingUser = await prisma.user.findUnique({
-    where: { username: config.username },
-    select: { id: true, role: true },
-  });
-
-  if (existingUser && existingUser.role !== UserRole.OWNER) {
-    throw new Error(
-      `Refusing to promote existing user ${config.username} from ${existingUser.role} to OWNER`,
-    );
-  }
-
-  const passwordHash = await hash(config.password, config.passwordRounds);
-  const owner = await prisma.user.upsert({
-    where: { username: config.username },
-    create: {
-      fullName: config.fullName,
-      username: config.username,
-      passwordHash,
-      role: UserRole.OWNER,
-      status: UserStatus.ACTIVE,
-    },
-    update: {
-      fullName: config.fullName,
-      passwordHash,
-      status: UserStatus.ACTIVE,
-    },
-    select: {
-      id: true,
-      fullName: true,
-      username: true,
-      role: true,
-      status: true,
-    },
-  });
-
-  console.info({ owner }, "Initial OWNER seed completed");
-}
-
 async function main(): Promise<void> {
   const target = process.argv[2] ?? "owner";
 
   if (target === "owner") {
-    await seedOwner();
+    const owner = await seedInitialOwner(prisma);
+    console.info({ owner }, "Initial OWNER seed completed");
+    return;
+  }
+
+  if (target === "users") {
+    const users = await seedSharedUsers(prisma);
+    console.info({ users }, "Shared seed accounts completed");
     return;
   }
 
@@ -127,8 +93,9 @@ async function main(): Promise<void> {
 }
 
 main()
-  .catch((error: unknown) => {
-    console.error("Seed failed", error);
+  .catch(() => {
+    // Prisma errors can include query arguments: never print the raw error.
+    console.error("Seed failed. Check configuration, identity conflicts and database connectivity.");
     process.exitCode = 1;
   })
   .finally(async () => {

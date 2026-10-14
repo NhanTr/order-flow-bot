@@ -1,21 +1,25 @@
 name: order-flow
 
 x-backend-image: &backend-image
-  image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-backend:${ORDER_FLOW_VERSION:-latest}
+  image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-backend:${ORDER_FLOW_VERSION:?Set ORDER_FLOW_VERSION to an immutable sha-<commit> release tag}
 
-x-database-environment: &database-environment
-  DATABASE_URL: postgresql://${POSTGRES_USER:-order_flow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
-  DIRECT_URL: postgresql://${POSTGRES_USER:-order_flow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
+x-runtime-security: &runtime-security
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
 
 services:
   postgres:
-    image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-postgres:${ORDER_FLOW_VERSION:-latest}
+    image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-postgres:${ORDER_FLOW_VERSION:?Set ORDER_FLOW_VERSION to an immutable sha-<commit> release tag}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-order_flow}
       POSTGRES_USER: ${POSTGRES_USER:-order_flow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -24,35 +28,59 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952}
     command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_API_PASSWORD: ${REDIS_API_PASSWORD:?Set REDIS_API_PASSWORD in .env.docker}
     volumes:
       - redis_data:/data
+    networks: [data]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$${REDIS_API_PASSWORD} redis-cli --user order_flow_api ping >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
+  redis-init:
+    <<: *runtime-security
+    image: ${REDIS_IMAGE:-redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952}
+    command: ["/bin/sh", "/bootstrap/redis-init.sh"]
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD:?Set REDIS_ADMIN_PASSWORD in .env.docker}
+      REDIS_API_PASSWORD: ${REDIS_API_PASSWORD:?Set REDIS_API_PASSWORD in .env.docker}
+      REDIS_BFF_PASSWORD: ${REDIS_BFF_PASSWORD:?Set REDIS_BFF_PASSWORD in .env.docker}
+      REDIS_WORKER_PASSWORD: ${REDIS_WORKER_PASSWORD:?Set REDIS_WORKER_PASSWORD in .env.docker}
+    volumes:
+      - ./deploy/redis-init.sh:/bootstrap/redis-init.sh:ro
+    networks: [data]
+    depends_on:
+      redis:
+        condition: service_started
+    restart: "no"
+
   db-init:
-    <<: *backend-image
+    <<: [*backend-image, *runtime-security]
     command: ["node", "scripts/container-init.cjs"]
     environment:
-      <<: *database-environment
+      ADMIN_DATABASE_URL: postgresql://${POSTGRES_USER:-order_flow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
+      API_DATABASE_PASSWORD: ${API_DATABASE_PASSWORD:?Set API_DATABASE_PASSWORD in .env.docker}
+      WORKER_DATABASE_PASSWORD: ${WORKER_DATABASE_PASSWORD:?Set WORKER_DATABASE_PASSWORD in .env.docker}
       SEED_OWNER_FULL_NAME: ${SEED_OWNER_FULL_NAME:-Store Owner}
       SEED_OWNER_USERNAME: ${SEED_OWNER_USERNAME:-owner}
       SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD:?Set SEED_OWNER_PASSWORD in .env.docker}
       SEED_PASSWORD_ROUNDS: ${SEED_PASSWORD_ROUNDS:-12}
+    networks: [data]
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
   api:
-    <<: *backend-image
+    <<: [*backend-image, *runtime-security]
     environment:
-      <<: *database-environment
+      DATABASE_URL: postgresql://order_flow_api:${API_DATABASE_PASSWORD:?Set API_DATABASE_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
+      DIRECT_URL: postgresql://order_flow_api:${API_DATABASE_PASSWORD:?Set API_DATABASE_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3001
@@ -60,7 +88,9 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env.docker}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
       JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-2592000}
-      AUTH_SESSION_CACHE_MAX: ${AUTH_SESSION_CACHE_MAX:-10000}
+      REDIS_URL: redis://order_flow_api:${REDIS_API_PASSWORD:?Set REDIS_API_PASSWORD in .env.docker}@redis:6379
+      API_PROXY_SECRET: ${API_PROXY_SECRET:?Set API_PROXY_SECRET in .env.docker}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
       BOT_INTERNAL_SECRET: ${BOT_INTERNAL_SECRET:?Set BOT_INTERNAL_SECRET in .env.docker}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env.docker}
       TELEGRAM_AUTH_MAX_AGE_SECONDS: ${TELEGRAM_AUTH_MAX_AGE_SECONDS:-300}
@@ -71,11 +101,15 @@ services:
       SEPAY_WEBHOOK_API_KEY: ${SEPAY_WEBHOOK_API_KEY:-}
       SEPAY_API_TOKEN: ${SEPAY_API_TOKEN:-}
       SEPAY_API_BASE_URL: ${SEPAY_API_BASE_URL:-https://userapi.sepay.vn/v2/transactions}
-    ports:
-      - "${API_PORT:-3001}:3001"
+    expose: ["3001"]
+    networks: [app, data]
     depends_on:
       db-init:
         condition: service_completed_successfully
+      redis-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -85,13 +119,22 @@ services:
     restart: unless-stopped
 
   web:
-    image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-frontend:${ORDER_FLOW_VERSION:-latest}
+    <<: *runtime-security
+    image: ${ORDER_FLOW_IMAGE_PREFIX:-ghcr.io/danielnguyendbk/order-flow}-frontend:${ORDER_FLOW_VERSION:?Set ORDER_FLOW_VERSION to an immutable sha-<commit> release tag}
     environment:
       API_BASE_URL: http://api:3001/api/v1
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+      API_PROXY_SECRET: ${API_PROXY_SECRET:?Set API_PROXY_SECRET in .env.docker}
+      BFF_REDIS_URL: redis://order_flow_bff:${REDIS_BFF_PASSWORD:?Set REDIS_BFF_PASSWORD in .env.docker}@redis:6379
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env.docker}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    expose: ["3000"]
+    networks: [app, data]
     depends_on:
       api:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
@@ -102,7 +145,7 @@ services:
     restart: unless-stopped
 
   telegram-bot:
-    <<: *backend-image
+    <<: [*backend-image, *runtime-security]
     command: ["node", "apps/telegram-bot/dist/index.js"]
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env.docker}
@@ -112,27 +155,58 @@ services:
       TELEGRAM_WEBHOOK_PATH: ${TELEGRAM_WEBHOOK_PATH:-/telegram/webhook}
       TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:-}
       PORT: 3002
-    ports:
-      - "${BOT_WEBHOOK_PORT:-3002}:3002"
+    expose: ["3002"]
+    networks: [app]
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
 
   notification-worker:
-    <<: *backend-image
+    <<: [*backend-image, *runtime-security]
     command: ["node", "apps/telegram-bot/dist/worker.js"]
     environment:
-      <<: *database-environment
+      DATABASE_URL: postgresql://order_flow_worker:${WORKER_DATABASE_PASSWORD:?Set WORKER_DATABASE_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-order_flow}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env.docker}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://order_flow_worker:${REDIS_WORKER_PASSWORD:?Set REDIS_WORKER_PASSWORD in .env.docker}@redis:6379
+    networks: [app, data]
     depends_on:
       db-init:
+        condition: service_completed_successfully
+      redis-init:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
 
+  caddy:
+    <<: *runtime-security
+    image: ${CADDY_IMAGE:-caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d}
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env.docker}
+      TELEGRAM_WEBHOOK_PATH: ${TELEGRAM_WEBHOOK_PATH:-/telegram/webhook}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge, app]
+    depends_on:
+      web:
+        condition: service_healthy
+    cap_add: [NET_BIND_SERVICE]
+    restart: unless-stopped
+
+networks:
+  edge:
+  app:
+  data:
+    internal: true
+
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:

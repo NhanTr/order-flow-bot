@@ -1,0 +1,22 @@
+meta {
+  name: getCurrentAdmin
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get the authenticated owner profile
+
+  Source: backend/docs/openapi.yaml
+
+}

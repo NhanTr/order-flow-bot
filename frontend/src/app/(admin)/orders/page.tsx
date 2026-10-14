@@ -1,20 +1,15 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { PageHeader, Panel, Badge, EmptyState, orderPaymentTone, Field, Modal, PageLoading } from "@/components/ui";
+import { PageHeader, Panel, Badge, EmptyState, orderPaymentTone, Field, PageLoading } from "@/components/ui";
 import { PeriodFilter } from "@/components/PeriodFilter";
-import { useToast } from "@/components/Toast";
 import { formatVnd, formatDate, formatTime } from "@/lib/format";
 import { inPeriod, type Period } from "@/lib/period";
 import {
   getOrders,
-  getCurrentUser,
-  cancelOrder,
-  overrideOrderStatus,
   type ApiOrder,
-  type ApiUser,
 } from "@/lib/api";
 import { useApiData } from "@/lib/use-api-data";
 import { toOrder } from "@/lib/view-models";
@@ -45,14 +40,12 @@ function OrdersPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const toast = useToast();
 
   const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [paymentStatus, setPaymentStatus] = useState(searchParams.get("paymentStatus") ?? "");
   const [fulfillmentStatus, setFulfillmentStatus] = useState(searchParams.get("fulfillmentStatus") ?? "");
   const [period, setPeriod] = useState<Period | "">((searchParams.get("period") as Period) ?? "");
   const [needsAction, setNeedsAction] = useState(searchParams.get("needsAction") === "1");
-  const [me, setMe] = useState<ApiUser | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -65,19 +58,13 @@ function OrdersPageInner() {
   }, [q, paymentStatus, fulfillmentStatus, period, needsAction, pathname, router]);
 
   const load = useCallback(async () => {
-    const [ordersPayload, mePayload] = await Promise.all([
-      getOrders(500),
-      getCurrentUser().catch(() => null),
-    ]);
-    setMe(mePayload?.data ?? null);
+    const ordersPayload = await getOrders(500);
     return ordersPayload.data;
   }, []);
 
   const { data: apiRows, loading, error, reload } = useApiData<ApiOrder[]>(load, []);
 
   const rows: Order[] = useMemo(() => apiRows.map(toOrder), [apiRows]);
-
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -106,21 +93,6 @@ function OrdersPageInner() {
   }, [filtered]);
 
   const hasFilters = Boolean(q || paymentStatus || fulfillmentStatus || needsAction || period);
-
-  const act = async (orderId: string, action: () => Promise<unknown>, success: string) => {
-    setBusyId(orderId);
-    try {
-      await action();
-      await reload();
-      toast.push(success, "success");
-    } catch (actionError) {
-      toast.push(actionError instanceof Error ? actionError.message : "Không thể thực hiện thao tác.", "error");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-
 
   if (loading && rows.length === 0) {
     return <PageLoading label="Đang tải danh sách đơn hàng..." subText="Đang lấy thông tin đơn hàng và trạng thái pha chế..." />;

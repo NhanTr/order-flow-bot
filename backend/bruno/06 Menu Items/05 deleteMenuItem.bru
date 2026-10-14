@@ -1,0 +1,22 @@
+meta {
+  name: deleteMenuItem
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/admin/menu-items/{{menuItemId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Delete an unused menu item
+
+  Source: backend/docs/openapi.yaml
+
+}

@@ -1,0 +1,22 @@
+meta {
+  name: getEmployee
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/employees/{{employeeId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Get an employee by ID
+
+  Source: backend/docs/openapi.yaml
+
+}

@@ -1,0 +1,22 @@
+meta {
+  name: listSepayTransactions
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/transactions
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List received SePay transactions
+
+  Source: backend/docs/openapi.yaml
+
+}

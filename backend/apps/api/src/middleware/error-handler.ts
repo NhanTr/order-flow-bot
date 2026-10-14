@@ -37,10 +37,26 @@ export const errorHandler: ErrorRequestHandler = (
   }
 
   if (isHttpError(error)) {
+    const parserType = (error as { type?: string }).type;
+    const isMalformedBody = error.statusCode === 400 && parserType === "entity.parse.failed";
+    const isOversizedBody = error.statusCode === 413 || parserType === "entity.too.large";
+    const isServerError = error.statusCode >= 500;
     response.status(error.statusCode).json({
       error: {
-        code: error.statusCode === 401 ? "UNAUTHORIZED" : "HTTP_ERROR",
-        message: error.message,
+        code: isOversizedBody
+          ? "PAYLOAD_TOO_LARGE"
+          : error.statusCode === 400
+            ? "VALIDATION_ERROR"
+            : error.statusCode === 401
+              ? "UNAUTHORIZED"
+              : "HTTP_ERROR",
+        message: isOversizedBody
+          ? "Request body is too large"
+          : isMalformedBody
+            ? "Malformed request body"
+            : isServerError
+              ? "Internal server error"
+              : error.message,
         requestId: request.requestId,
       },
     });

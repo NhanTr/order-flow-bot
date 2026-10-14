@@ -17,6 +17,12 @@
     "dev:bot": "tsx apps/telegram-bot/src/dev-runner.ts bot",
     "dev:notification-worker": "tsx apps/telegram-bot/src/dev-runner.ts notification-worker",
     "notifications:requeue": "tsx apps/telegram-bot/src/dev-runner.ts notifications-requeue",
+    "test:security-bootstrap": "node --test scripts/security-bootstrap.test.cjs",
+    "test:runtime-roles": "node --test scripts/runtime-roles.security.integration.test.cjs",
+    "test:redis-acl": "node --test scripts/redis-acl.security.integration.test.cjs",
+    "test:security-audit": "node --test scripts/audit-runtime.test.cjs",
+    "security:audit": "node scripts/audit-runtime.cjs backend backend/apps/api frontend",
+    "security:smoke": "node scripts/security-smoke.cjs",
     "start:bot": "node apps/telegram-bot/dist/index.js",
     "start:notification-worker": "node apps/telegram-bot/dist/worker.js",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
@@ -26,8 +32,9 @@
     "db:sync:users:docker": "tsx prisma/sync-users-to-docker.ts",
     "build:bot": "tsc --project apps/telegram-bot/tsconfig.json",
     "check:bot": "tsc --noEmit --project apps/telegram-bot/tsconfig.json",
-    "test:bot": "vitest run --config apps/telegram-bot/vitest.config.ts",
+    "test:bot": "vitest run --config apps/telegram-bot/vitest.config.mts",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "seed:users": "tsx prisma/seed.ts users",
     "seed:be004": "tsx prisma/seed.ts be004",
     "seed:menu": "tsx --env-file=../.env.local prisma/seed.ts menu",
     "seed:thai": "tsx prisma/seed.ts thai",
@@ -43,14 +50,16 @@
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.58.0",
     "dotenv": "^17.4.2",
+    "pg": "^8.22.0",
+    "redis": "^6.3.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
     "prisma": "6.19.3",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
-    "vitest": "^3.0.5"
+    "vitest": "^4.1.11"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -1,7 +1,6 @@
+import { seedSharedUsers } from "./shared-users.seed";
 import {
   PrismaClient,
-  UserRole,
-  UserStatus,
   PaymentMethod,
   PaymentStatus,
   FulfillmentStatus,
@@ -12,22 +11,7 @@ import {
 export async function seedReconciliationDemo(prisma: PrismaClient) {
   console.log("Starting reconciliation demo data seed...");
 
-  // Find or create an active user to assign as creator
-  let creator = await prisma.user.findFirst({
-    where: { role: UserRole.OWNER, status: UserStatus.ACTIVE },
-  });
-
-  if (!creator) {
-    creator = await prisma.user.create({
-      data: {
-        fullName: "Quản lý Cửa Hàng",
-        username: "demo_owner",
-        passwordHash: "demo-hash",
-        role: UserRole.OWNER,
-        status: UserStatus.ACTIVE,
-      },
-    });
-  }
+  const { owner: creator, serviceStaff, barista } = await seedSharedUsers(prisma);
 
   // Find or create category and menu item
   let category = await prisma.menuCategory.findFirst();
@@ -65,7 +49,7 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
       expectedAmount: BigInt(90000),
       amountIn: BigInt(70000), // Thiếu 20k
       paymentStatus: PaymentStatus.UNDERPAID,
-      fulfillmentStatus: FulfillmentStatus.PREPARING,
+      fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT,
       matchStatus: TransactionMatchStatus.UNMATCHED,
       sepayTxId: BigInt(9900101),
       code: "ORD-RECON-101",
@@ -79,7 +63,7 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
       expectedAmount: BigInt(140000),
       amountIn: BigInt(150000), // Thừa 10k
       paymentStatus: PaymentStatus.OVERPAID,
-      fulfillmentStatus: FulfillmentStatus.QUEUED,
+      fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT,
       matchStatus: TransactionMatchStatus.UNMATCHED,
       sepayTxId: BigInt(9900102),
       code: "ORD-RECON-102",
@@ -136,18 +120,23 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
     const order = await prisma.order.upsert({
       where: { orderCode: item.orderCode },
       update: {
+        createdByUserId: serviceStaff.id,
         paymentMethod: PaymentMethod.QR,
         paymentStatus: item.paymentStatus,
         fulfillmentStatus: item.fulfillmentStatus,
+        assignedBaristaId: item.fulfillmentStatus === FulfillmentStatus.READY ? barista.id : null,
+        paidAt: item.paymentStatus === PaymentStatus.PAID ? new Date() : null,
         totalAmount: item.expectedAmount,
         customerNote: item.customerInput,
       },
       create: {
         orderCode: item.orderCode,
-        createdByUserId: creator.id,
+        createdByUserId: serviceStaff.id,
         paymentMethod: PaymentMethod.QR,
         paymentStatus: item.paymentStatus,
         fulfillmentStatus: item.fulfillmentStatus,
+        assignedBaristaId: item.fulfillmentStatus === FulfillmentStatus.READY ? barista.id : null,
+        paidAt: item.paymentStatus === PaymentStatus.PAID ? new Date() : null,
         totalAmount: item.expectedAmount,
         customerNote: item.customerInput,
       },
@@ -176,23 +165,28 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
         paymentCode: item.code,
         expectedAmount: item.expectedAmount,
         receivedAmount: item.amountIn,
-        confirmedAt: item.paymentStatus === PaymentStatus.PAID ? new Date() : null,
+        // QR transfers have no CASH confirmation actor/timestamp.
+        cashConfirmedByUserId: null,
+        confirmedAt: null,
       },
       create: {
         orderId: order.id,
         paymentCode: item.code,
         expectedAmount: item.expectedAmount,
         receivedAmount: item.amountIn,
-        confirmedAt: item.paymentStatus === PaymentStatus.PAID ? new Date() : null,
+        // QR transfers have no CASH confirmation actor/timestamp.
+        cashConfirmedByUserId: null,
+        confirmedAt: null,
       },
     });
 
     // 4. Create or update SepayTransaction
     const diff = item.amountIn - item.expectedAmount;
-    const isResolved = item.resolutionAction && item.resolutionAction !== ResolutionAction.NONE;
+    const resolutionAction = item.resolutionAction ?? ResolutionAction.NONE;
+    const isResolved = resolutionAction !== ResolutionAction.NONE;
 
     await prisma.sepayTransaction.upsert({
-      where: { sepayTransactionId: item.sepayTxId },
+      where: { sepayTransactionId: item.sepayTxId.toString() },
       update: {
         paymentId: payment.id,
         transactionDate: new Date(),
@@ -201,13 +195,13 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
         amountIn: item.amountIn,
         differenceAmount: diff,
         matchStatus: item.matchStatus,
-        resolutionAction: item.resolutionAction ?? ResolutionAction.NONE,
+        resolutionAction,
         resolutionNote: item.resolutionNote ?? null,
         resolvedByUserId: isResolved ? creator.id : null,
         resolvedAt: isResolved ? new Date() : null,
       },
       create: {
-        sepayTransactionId: item.sepayTxId,
+        sepayTransactionId: item.sepayTxId.toString(),
         paymentId: payment.id,
         transactionDate: new Date(),
         code: item.code,
@@ -215,7 +209,7 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
         amountIn: item.amountIn,
         differenceAmount: diff,
         matchStatus: item.matchStatus,
-        resolutionAction: item.resolutionAction ?? ResolutionAction.NONE,
+        resolutionAction,
         resolutionNote: item.resolutionNote ?? null,
         resolvedByUserId: isResolved ? creator.id : null,
         resolvedAt: isResolved ? new Date() : null,
@@ -226,7 +220,7 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
 
   // 5. Create a standalone WRONG_CODE SepayTransaction (not linked to any order)
   await prisma.sepayTransaction.upsert({
-    where: { sepayTransactionId: BigInt(9900999) },
+    where: { sepayTransactionId: "9900999" },
     update: {
       transactionDate: new Date(),
       code: "WRONG-CODE-999",
@@ -236,7 +230,7 @@ export async function seedReconciliationDemo(prisma: PrismaClient) {
       resolutionAction: ResolutionAction.NONE,
     },
     create: {
-      sepayTransactionId: BigInt(9900999),
+      sepayTransactionId: "9900999",
       transactionDate: new Date(),
       code: "WRONG-CODE-999",
       content: "CHUYEN TIEN KHONG DE MA DON OR KHAC MA",

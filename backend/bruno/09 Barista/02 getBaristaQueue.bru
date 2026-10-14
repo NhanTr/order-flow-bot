@@ -1,0 +1,22 @@
+meta {
+  name: getBaristaQueue
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/barista/queue
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List queued paid orders
+
+  Source: backend/docs/openapi.yaml
+
+}

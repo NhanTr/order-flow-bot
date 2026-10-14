@@ -10,7 +10,7 @@ export default function ForbiddenPage() {
         </span>
         <h1 className="mt-4 text-xl font-extrabold text-ink">Không có quyền truy cập</h1>
         <p className="mt-2 text-sm text-muted">Tài khoản của bạn không có quyền thực hiện thao tác này.</p>
-        <Link href="/dashboard" className="btn mt-6">Quay lại tổng quan</Link>
+        <Link href="/orders" className="btn mt-6">Quay lại đơn hàng</Link>
       </Panel>
     </div>
   );

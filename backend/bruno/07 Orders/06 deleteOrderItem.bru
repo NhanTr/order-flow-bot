@@ -1,0 +1,22 @@
+meta {
+  name: deleteOrderItem
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/items/{{orderItemId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Delete an order item
+
+  Source: backend/docs/openapi.yaml
+
+}

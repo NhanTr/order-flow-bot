@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AccessIdentity } from "../../auth/auth.types";
 import { FulfillmentStatus, PaymentStatus } from "../../orders/order.types";
 import { PaymentService } from "../payment.service";
 
@@ -8,9 +9,7 @@ const tx = vi.hoisted(() => ({
     findUnique: vi.fn(),
     updateMany: vi.fn(),
   },
-  user: {
-    findUnique: vi.fn(),
-  },
+
   payment: {
     updateMany: vi.fn(),
     update: vi.fn(),
@@ -30,15 +29,23 @@ vi.mock("@prisma/client", () => ({
   AuditEntityType: {
     PAYMENT: "PAYMENT",
   },
-  PrismaClient: vi.fn(() => ({
+  PrismaClient: vi.fn(function PrismaClientMock() {
+    return {
     $transaction: vi.fn((callback) => callback(tx)),
     order: {
       findUnique: vi.fn(),
     },
-  })),
+    };
+  }),
 }));
 
 describe("PaymentService financial audit", () => {
+  const staff: AccessIdentity = {
+    userId: "staff-1",
+    sessionId: "staff-session",
+    role: "SERVICE_STAFF",
+  };
+
   it("records an audit log when confirming cash payment", async () => {
     vi.clearAllMocks();
     tx.order.findUnique.mockResolvedValue({
@@ -54,7 +61,6 @@ describe("PaymentService financial audit", () => {
         confirmedAt: null,
       },
     });
-    tx.user.findUnique.mockResolvedValue({ id: "staff-1", role: "SERVICE_STAFF" });
     tx.payment.updateMany.mockResolvedValue({ count: 1 });
     tx.order.updateMany.mockResolvedValue({ count: 1 });
     tx.orderStatusHistory.createMany.mockResolvedValue({ count: 2 });
@@ -62,7 +68,7 @@ describe("PaymentService financial audit", () => {
 
     await new PaymentService({} as any).confirmCash("order-1", {
       confirmedByUserId: "staff-1",
-    });
+    }, staff);
 
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -91,7 +97,6 @@ describe("PaymentService financial audit", () => {
       totalAmount: 55000n,
       payment: null,
     });
-    tx.user.findUnique.mockResolvedValue({ id: "staff-1", role: "SERVICE_STAFF" });
     tx.payment.create.mockResolvedValue({
       id: "payment-qr-1",
       paymentCode: "PAYORDQR1",
@@ -102,7 +107,7 @@ describe("PaymentService financial audit", () => {
 
     await new PaymentService({} as any).initQrPayment("order-1", {
       requestedByUserId: "staff-1",
-    });
+    }, staff);
 
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

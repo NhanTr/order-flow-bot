@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { AdminService } from "./admin.service";
 import { OrderFilters, FulfillmentStatus, PaymentStatus, OrderStatusDomain } from "../orders/order.types";
 import { validateOverrideStatus } from "../orders/order.validation";
+import { parsePagination } from "../../middleware/pagination";
 
 /**
  * Handles HTTP requests for admin-level order management.
@@ -17,13 +18,14 @@ export class AdminController {
   // Query: fulfillmentStatus, paymentStatus, createdByUserId, assignedBaristaId, page, limit
   public listOrders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const { page, limit } = parsePagination(req.query);
       const filters: OrderFilters = {
         fulfillmentStatus: req.query.fulfillmentStatus as FulfillmentStatus | undefined,
         paymentStatus:     req.query.paymentStatus     as PaymentStatus     | undefined,
         createdByUserId:   req.query.createdByUserId   as string | undefined,
         assignedBaristaId: req.query.assignedBaristaId as string | undefined,
-        page:  req.query.page  ? parseInt(req.query.page  as string, 10) : 1,
-        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
+        page,
+        limit,
       };
       const result = await this.adminService.getAllOrders(filters);
       res.status(200).json(result);

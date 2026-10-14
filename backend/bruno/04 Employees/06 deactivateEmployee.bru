@@ -1,0 +1,22 @@
+meta {
+  name: deactivateEmployee
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/employees/{{employeeId}}/deactivate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Deactivate an employee
+
+  Source: backend/docs/openapi.yaml
+
+}

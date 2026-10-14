@@ -1,0 +1,169 @@
+name: Security checks
+
+on:
+  pull_request:
+  push:
+    branches: [dev, master]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+        env:
+          POSTGRES_DB: order_flow_security_test
+          POSTGRES_USER: bootstrap_admin
+          POSTGRES_PASSWORD: Bootstrap.password-2026.test
+        ports: ["55440:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bootstrap_admin -d order_flow_security_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+        ports: ["56380:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ADMIN_DATABASE_URL: postgresql://bootstrap_admin:Bootstrap.password-2026.test@127.0.0.1:55440/order_flow_security_test
+      API_DATABASE_PASSWORD: Api.database-password-2026.test
+      WORKER_DATABASE_PASSWORD: Worker.database-password-2026.test
+      TEST_DATABASE_URL: postgresql://bootstrap_admin:Bootstrap.password-2026.test@127.0.0.1:55440/order_flow_security_test
+      TEST_API_DATABASE_URL: postgresql://order_flow_api:Api.database-password-2026.test@127.0.0.1:55440/order_flow_security_test
+      TEST_WORKER_DATABASE_URL: postgresql://order_flow_worker:Worker.database-password-2026.test@127.0.0.1:55440/order_flow_security_test
+      TEST_REDIS_URL: redis://order_flow_api:Api.redis-password-2026.test@127.0.0.1:56380
+      TEST_REDIS_API_URL: redis://order_flow_api:Api.redis-password-2026.test@127.0.0.1:56380
+      TEST_REDIS_BFF_URL: redis://order_flow_bff:Bff.redis-password-2026.test@127.0.0.1:56380
+      TEST_REDIS_WORKER_URL: redis://order_flow_worker:Worker.redis-password-2026.test@127.0.0.1:56380
+      TEST_REDIS_ADMIN_URL: redis://order_flow_admin:Admin.redis-password-2026.test@127.0.0.1:56380
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            backend/apps/api/package-lock.json
+            frontend/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm --prefix backend ci
+          npm --prefix backend/apps/api ci
+          npm --prefix frontend ci
+          npm --prefix backend run generate:prisma
+      - name: Initialize disposable PostgreSQL
+        env:
+          PGPASSWORD: Bootstrap.password-2026.test
+        run: |
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_security_test -v ON_ERROR_STOP=1 -f backend/prisma/sql/telegram_order_sepay_supabase_fixed.sql
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_security_test -v ON_ERROR_STOP=1 -f backend/prisma/sql/2026-08-12_sepay_v2_transaction_ids.sql
+          node backend/scripts/security-bootstrap.cjs
+      - name: Initialize disposable Redis ACLs
+        run: |
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE/deploy/redis-init.sh:/bootstrap/redis-init.sh:ro" \
+            -e REDIS_HOST=127.0.0.1 \
+            -e REDIS_ADMIN_PASSWORD=Admin.redis-password-2026.test \
+            -e REDIS_API_PASSWORD=Api.redis-password-2026.test \
+            -e REDIS_BFF_PASSWORD=Bff.redis-password-2026.test \
+            -e REDIS_WORKER_PASSWORD=Worker.redis-password-2026.test \
+            redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952 /bin/sh /bootstrap/redis-init.sh
+      - name: API checks
+        run: |
+          npm --prefix backend/apps/api run check
+          npm --prefix backend/apps/api test
+          npm --prefix backend/apps/api run test:node
+          npm --prefix backend/apps/api run test:security:integration
+      - name: Bot checks
+        run: |
+          npm --prefix backend run check:bot
+          npm --prefix backend run test:bot
+          npm --prefix backend run build:bot
+      - name: Frontend checks
+        env:
+          BFF_REDIS_URL: redis://order_flow_bff:Bff.redis-password-2026.test@127.0.0.1:56380
+          TEST_REDIS_URL: redis://order_flow_bff:Bff.redis-password-2026.test@127.0.0.1:56380
+        run: |
+          npm --prefix frontend run test:security
+          npm --prefix frontend run lint
+          npm --prefix frontend run build
+      - name: Least-privilege and deployment checks
+        run: |
+          npm --prefix backend run test:security-bootstrap
+          npm --prefix backend run test:runtime-roles
+          npm --prefix backend run test:redis-acl
+          npm --prefix backend run test:security-audit
+          npm --prefix backend run security:smoke
+          npm --prefix backend run security:audit
+      - name: Seed backup restore fixture
+        env:
+          PGPASSWORD: Bootstrap.password-2026.test
+        run: |
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_security_test -v ON_ERROR_STOP=1 -c "BEGIN; INSERT INTO users (id, full_name, telegram_user_id, role) VALUES ('10000000-0000-4000-8000-000000000001', 'Restore rehearsal staff', 990001, 'SERVICE_STAFF'); INSERT INTO orders (id, order_code, created_by_user_id, total_amount) VALUES ('20000000-0000-4000-8000-000000000001', 'RESTORE-001', '10000000-0000-4000-8000-000000000001', 10000); INSERT INTO payments (id, order_id, expected_amount) VALUES ('30000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 10000); INSERT INTO order_status_history (id, order_id, status_domain, new_status, changed_by_user_id) VALUES ('40000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'FULFILLMENT', 'PENDING_PAYMENT', '10000000-0000-4000-8000-000000000001'); INSERT INTO notifications (id, event, source_key, order_id, recipient_user_id, recipient_telegram_chat_id, message) VALUES ('50000000-0000-4000-8000-000000000001', 'ORDER_READY', 'restore-rehearsal', '20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 990001, 'Restore rehearsal'); COMMIT;"
+      - name: Backup restore rehearsal
+        env:
+          PGPASSWORD: Bootstrap.password-2026.test
+        run: |
+          pg_dump -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_security_test -Fc -f /tmp/order-flow-security.dump
+          createdb -h 127.0.0.1 -p 55440 -U bootstrap_admin order_flow_restore_security_test
+          pg_restore -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_restore_security_test --no-owner /tmp/order-flow-security.dump
+          source_counts=$(psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_security_test -Atc "SELECT (SELECT count(*) FROM users)||':'||(SELECT count(*) FROM orders)||':'||(SELECT count(*) FROM payments)||':'||(SELECT count(*) FROM order_status_history)||':'||(SELECT count(*) FROM notifications)")
+          restore_counts=$(psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_restore_security_test -Atc "SELECT (SELECT count(*) FROM users)||':'||(SELECT count(*) FROM orders)||':'||(SELECT count(*) FROM payments)||':'||(SELECT count(*) FROM order_status_history)||':'||(SELECT count(*) FROM notifications)")
+          test "$source_counts" = "1:1:1:1:1"
+          test "$source_counts" = "$restore_counts"
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_restore_security_test -Atc "SELECT count(*) FROM payments p LEFT JOIN orders o ON o.id=p.order_id WHERE o.id IS NULL" | grep -qx 0
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_restore_security_test -Atc "SELECT count(*) FROM order_status_history h LEFT JOIN orders o ON o.id=h.order_id WHERE o.id IS NULL" | grep -qx 0
+          psql -h 127.0.0.1 -p 55440 -U bootstrap_admin -d order_flow_restore_security_test -Atc "SELECT count(*) FROM notifications n LEFT JOIN users u ON u.id=n.recipient_user_id WHERE u.id IS NULL" | grep -qx 0
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  containers:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: backend
+            dockerfile: backend/Dockerfile
+          - name: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+          - name: postgres
+            context: backend
+            dockerfile: backend/Dockerfile.postgres
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build runtime image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: order-flow-${{ matrix.name }}:security-scan
+      - name: Scan runtime image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: order-flow-${{ matrix.name }}:security-scan
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL

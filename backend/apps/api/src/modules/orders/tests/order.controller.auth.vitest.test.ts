@@ -28,7 +28,11 @@ describe("OrderController authenticated actor", () => {
   function requestWithSpoofedActor(): Request {
     return {
       params: { orderId: "order-1" },
-      body: { requesterId: "spoofed-user", baristaId: "spoofed-barista" },
+      body: {
+        requesterId: "spoofed-user",
+        baristaId: "spoofed-barista",
+        reason: "Authenticated owner action",
+      },
       auth: { userId: "owner-1", sessionId: "session-1", role: "OWNER" },
     } as unknown as Request;
   }
@@ -38,7 +42,11 @@ describe("OrderController authenticated actor", () => {
 
     await controller.markReady(requestWithSpoofedActor(), response, next);
 
-    expect(service.markReady).toHaveBeenCalledWith("order-1", "owner-1");
+    expect(service.markReady).toHaveBeenCalledWith(
+      "order-1",
+      "Authenticated owner action",
+      { userId: "owner-1", sessionId: "session-1", role: "OWNER" },
+    );
     expect(response.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });
@@ -48,7 +56,11 @@ describe("OrderController authenticated actor", () => {
 
     await controller.deliverOrder(requestWithSpoofedActor(), response, next);
 
-    expect(service.deliverOrder).toHaveBeenCalledWith("order-1", "owner-1");
+    expect(service.deliverOrder).toHaveBeenCalledWith(
+      "order-1",
+      "Authenticated owner action",
+      { userId: "owner-1", sessionId: "session-1", role: "OWNER" },
+    );
     expect(response.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });

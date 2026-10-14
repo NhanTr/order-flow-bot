@@ -1,4 +1,5 @@
 import { prisma } from "../../db";
+import { PUBLIC_USER_SELECT } from "../auth/public-user.select";
 import { Order, OrderFilters, PaginatedResult } from "../orders/order.types";
 
 function toOrderWithTimeline(order: unknown): Order {
@@ -42,8 +43,8 @@ export class AdminOrderRepository {
         skip,
         take:    limit,
         include: {
-          creator: true,
-          assignedBarista: true,
+          creator: { select: PUBLIC_USER_SELECT },
+          assignedBarista: { select: PUBLIC_USER_SELECT },
           items: true,
           payment: { include: { sepayTransactions: true } },
           history: { orderBy: { createdAt: "asc" } },
@@ -63,8 +64,8 @@ export class AdminOrderRepository {
     const order = await prisma.order.findUnique({
       where:   { id },
       include: {
-        creator: true,
-        assignedBarista: true,
+        creator: { select: PUBLIC_USER_SELECT },
+        assignedBarista: { select: PUBLIC_USER_SELECT },
         items: true,
         payment: { include: { sepayTransactions: true } },
         history: { orderBy: { createdAt: "asc" } },

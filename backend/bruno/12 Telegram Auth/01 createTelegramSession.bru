@@ -1,0 +1,37 @@
+meta {
+  name: createTelegramSession
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/telegram/session
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "initData": "{{telegramInitData}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() >= 200 && res.getStatus() < 300) {
+    const data = res.getBody().data;
+    if (data?.accessToken) bru.setVar("accessToken", data.accessToken);
+    if (data?.refreshToken) bru.setVar("refreshToken", data.refreshToken);
+    if (data?.user?.id) bru.setVar("userId", data.user.id);
+  }
+}
+
+docs {
+  Create a session from signed Telegram Web App data
+
+  Source: backend/docs/openapi.yaml
+
+}

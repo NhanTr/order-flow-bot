@@ -1,0 +1,19 @@
+meta {
+  name: listAdminOrders
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/orders
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  listAdminOrders
+}

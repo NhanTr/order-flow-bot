@@ -1,0 +1,31 @@
+meta {
+  name: overrideOrderStatus
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/orders/{{orderId}}/override-status
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "domain": "FULFILLMENT",
+    "status": "CANCELLED",
+    "reason": "Manual correction using Bruno"
+  }
+}
+
+docs {
+  overrideOrderStatus
+}

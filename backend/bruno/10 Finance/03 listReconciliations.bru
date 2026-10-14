@@ -1,0 +1,22 @@
+meta {
+  name: listReconciliations
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/admin/reconciliations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List reconciliation review transactions
+
+  Source: backend/docs/openapi.yaml
+
+}

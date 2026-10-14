@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ToastProvider, useToast } from "./Toast";
 import { PageHeaderProvider, usePageHeaderState } from "@/components/ui";
 import { ApiError, getCurrentUser, type ApiUser } from "@/lib/api";
+import { canAccessAdminPath, visibleNavigationFor } from "@/lib/access-policy";
 
 /* ── Icon set (stroke SVG nhẹ nhàng, đồng bộ kiểu Donezo) ── */
 const stroke = {
@@ -145,12 +146,15 @@ function Brand({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({ pathname, role, onNavigate }: { pathname: string; role: ApiUser["role"] | null; onNavigate?: () => void }) {
   const isActive = (href: string) =>
     pathname === href || (href !== "/dashboard" && pathname.startsWith(href + "/"));
+  const visible = new Set(role ? visibleNavigationFor(role).map((item) => item.href) : []);
   return (
     <nav className="space-y-5">
-      {NAV.map((group) => (
+      {NAV.map((group) => ({ ...group, items: group.items.filter((item) => visible.has(item.href)) }))
+        .filter((group) => group.items.length > 0)
+        .map((group) => (
         <div key={group.section}>
           <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
             {group.section}
@@ -249,14 +253,14 @@ function SidebarFooter() {
   );
 }
 
-function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function SidebarContent({ pathname, role, onNavigate }: { pathname: string; role: ApiUser["role"] | null; onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4 overscroll-contain">
       <div className="px-1 pt-1">
         <Brand />
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-none overscroll-contain">
-        <NavLinks pathname={pathname} onNavigate={onNavigate} />
+        <NavLinks pathname={pathname} role={role} onNavigate={onNavigate} />
       </div>
       <div className="border-t border-line pt-4">
         <SidebarFooter />
@@ -313,6 +317,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const [me, setMe] = useState<ApiUser | null>(null);
+  const [identityChecked, setIdentityChecked] = useState(false);
 
   // Kiểm tra phiên đăng nhập: nếu chưa đăng nhập / token hết hạn → đưa về trang login.
   useEffect(() => {
@@ -321,9 +326,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
       .then((payload) => {
         if (!alive) return;
         setMe(payload.data);
+        setIdentityChecked(true);
       })
       .catch((err) => {
         if (!alive) return;
+        setIdentityChecked(true);
         if (err instanceof ApiError && err.status === 401) {
           router.replace("/login");
         }
@@ -332,6 +339,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
       alive = false;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (me && !canAccessAdminPath(me.role, pathname)) {
+      router.replace("/forbidden");
+    }
+  }, [me, pathname, router]);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -352,13 +365,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (el) el.classList.toggle("hidden");
   };
 
+  if (!identityChecked || !me || !canAccessAdminPath(me.role, pathname)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface-soft text-sm font-medium text-muted">
+        Đang kiểm tra quyền truy cập...
+      </div>
+    );
+  }
+
   return (
     <ToastProvider>
       <PageHeaderProvider>
       <div className="min-h-screen">
         {/* Sidebar desktop */}
         <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-sidebar overscroll-contain lg:block">
-          <SidebarContent pathname={pathname} />
+          <SidebarContent pathname={pathname} role={me?.role ?? null} />
         </aside>
 
         {/* Drawer mobile */}
@@ -373,7 +394,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             >
               ×
             </button>
-            <SidebarContent pathname={pathname} onNavigate={openDrawer} />
+            <SidebarContent pathname={pathname} role={me?.role ?? null} onNavigate={openDrawer} />
           </div>
         </div>
 

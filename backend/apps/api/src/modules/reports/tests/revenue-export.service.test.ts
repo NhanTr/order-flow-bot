@@ -1,8 +1,7 @@
 import ExcelJS from "exceljs";
-import JSZip from "jszip";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { RevenueExportService } from "../revenue-export.service";
+import { parseRevenueExportInput } from "../revenue-export.validation";
 
 const from = new Date("2026-08-01T00:00:00+07:00");
 const to = new Date("2026-08-31T23:59:59.999+07:00");
@@ -23,13 +22,6 @@ const report = {
     orderCount: 2, refundCount: 1,
   }],
 };
-const taxInput = {
-  taxpayerName: "Công ty TNHH Order Flow", taxCode: "0312345678", activityName: "Dịch vụ ăn uống",
-  taxRatePercent: 20, deductibleExpenses: 400_000, adjustmentsIncrease: 0, adjustmentsDecrease: 0,
-  exemptIncome: 0, carriedLoss: 0, scienceFund: 0, taxRelief: 0,
-  priorOverpayment: 10_000, provisionalTaxPaid: 20_000,
-};
-
 function createService() {
   const cashPayment = {
     id: "payment-1", orderId: "order-1", paymentCode: null,
@@ -77,7 +69,10 @@ function createService() {
     items: [{ itemName: "Bạc xỉu", quantity: 1, unitPrice: 300_000n }],
   };
   const db = {
-    order: { findMany: vi.fn().mockResolvedValue([order1, order2, orderOutsideAccountingPeriod]) },
+    order: {
+      count: vi.fn().mockResolvedValue(3),
+      findMany: vi.fn().mockResolvedValue([order1, order2, orderOutsideAccountingPeriod]),
+    },
     payment: { findMany: vi.fn().mockResolvedValue([
       { ...cashPayment, order: order1, cashConfirmer: null, sepayTransactions: [] },
       { ...qrPayment, order: order2, cashConfirmer: null, sepayTransactions: [linkedSepay] },
@@ -93,10 +88,16 @@ function createService() {
     }]) },
   };
   const reportService = { getRevenueReport: vi.fn().mockResolvedValue(report) };
-  return new RevenueExportService(db as never, reportService as never, path.resolve(process.cwd(), "../../docs"));
+  return new RevenueExportService(db as never, reportService as never);
 }
 
 describe("RevenueExportService", () => {
+  it.each(["tax-revenue", "tax-revenue-expense"])("rejects removed %s export format", (format) => {
+    expect(() => parseRevenueExportInput({ from: "2026-08-01", to: "2026-08-31" }, {
+      format,
+    })).toThrow();
+  });
+
   it("creates an accounting workbook with reconciled net revenue", async () => {
     const result = await createService().export({ format: "xlsx", from, to });
     const workbook = new ExcelJS.Workbook();
@@ -130,30 +131,4 @@ describe("RevenueExportService", () => {
     expect(sepayIssueCell?.fill).toMatchObject({ fgColor: { argb: "FFFEF3C7" } });
     expect(sepayIssueCell?.note).toBeTruthy();
   });
-
-  it("fills the revenue-only declaration while retaining the 04/TNDN template", async () => {
-    const result = await createService().export({ format: "tax-revenue", from, to, ...taxInput });
-    const text = await documentText(result.buffer);
-    expect(text).toMatch(/Mẫu số:\s+04\/TNDN/);
-    expect(text).toContain("[04] Tên người nộp thuế: Công ty TNHH Order Flow");
-    expect(text).toContain("1.000.000");
-    expect(text).toContain("200.000");
-  });
-
-  it("fills the revenue-expense declaration and calculated taxable income", async () => {
-    const result = await createService().export({ format: "tax-revenue-expense", from, to, ...taxInput });
-    const text = await documentText(result.buffer);
-    expect(text).toMatch(/Mẫu số:\s+03\/TNDN/);
-    expect(text).toContain("[06] Tên người nộp thuế: Công ty TNHH Order Flow");
-    expect(text).toContain("600.000");
-    expect(text).toContain("120.000");
-  });
 });
-
-async function documentText(buffer: Buffer): Promise<string> {
-  const zip = await JSZip.loadAsync(buffer);
-  const xml = await zip.file("word/document.xml")!.async("string");
-  return [...xml.matchAll(/<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g)]
-    .map((match) => match[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"))
-    .join(" ");
-}

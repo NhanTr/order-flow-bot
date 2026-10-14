@@ -1,13 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
+import createHttpError from "http-errors";
 import ExcelJS from "exceljs";
-import JSZip from "jszip";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "../../db";
 import { createAccountingWorkbook as createControlWorkbook, loadAccountingExportData } from "./accounting-workbook";
 import { RevenueReportService, type RevenueReportInput } from "./revenue.service";
-import type { RevenueExportInput, TaxDeclarationInput } from "./revenue-export.validation";
+import type { RevenueExportInput } from "./revenue-export.validation";
 
 export interface RevenueExportResult {
   buffer: Buffer;
@@ -34,34 +31,29 @@ export class RevenueExportService {
   constructor(
     private readonly db: PrismaClient = prisma,
     private readonly revenueReportService: RevenueReportPort = new RevenueReportService(db),
-    private readonly templateDirectory = defaultTemplateDirectory(),
   ) {}
 
   public async export(input: RevenueExportInput): Promise<RevenueExportResult> {
     const range = { from: input.from, to: input.to };
+    const orderCount = await this.db.order.count({
+      where: {
+        OR: [
+          { createdAt: { gte: input.from, lte: input.to } },
+          { paidAt: { gte: input.from, lte: input.to } },
+        ],
+      },
+    });
+    if (orderCount > 10_000) {
+      throw createHttpError(413, "Revenue export exceeds the 10000-order limit");
+    }
     const report = await this.revenueReportService.getRevenueReport(range);
     const period = `${localDateKey(input.from)}_${localDateKey(input.to)}`;
 
-    if (input.format === "xlsx") {
-      const data = await loadAccountingExportData(this.db, range);
-      return {
-        buffer: await createControlWorkbook(report, data),
-        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename: `so-doanh-thu-${period}.xlsx`,
-      };
-    }
-
-    const isRevenueExpense = input.format === "tax-revenue-expense";
-    const templateName = isRevenueExpense
-      ? "2._03.TNDN_2507200143.docx"
-      : "15._04.TNDN_2507183508.docx";
-    const template = await readFile(path.join(this.templateDirectory, templateName));
-    const buffer = await createTaxDeclarationDocx(template, report, input, isRevenueExpense);
-
+    const data = await loadAccountingExportData(this.db, range);
     return {
-      buffer,
-      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      filename: `${isRevenueExpense ? "03-TNDN-doanh-thu-chi-phi" : "04-TNDN-doanh-thu"}-${period}.docx`,
+      buffer: await createControlWorkbook(report, data),
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      filename: `so-doanh-thu-${period}.xlsx`,
     };
   }
 
@@ -230,247 +222,10 @@ function styleWorkbook(
   sheet.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: sheet.rowCount, column: sheet.columnCount } };
 }
 
-async function createTaxDeclarationDocx(
-  template: Buffer,
-  report: Awaited<ReturnType<RevenueReportService["getRevenueReport"]>>,
-  tax: TaxDeclarationInput,
-  revenueExpenseMethod: boolean,
-): Promise<Buffer> {
-  const zip = await JSZip.loadAsync(template);
-  const documentFile = zip.file("word/document.xml");
-  if (!documentFile) throw new Error("Tax declaration template is missing word/document.xml");
-  let xml = await documentFile.async("string");
-  const year = new Intl.DateTimeFormat("en", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric" }).format(new Date(report.range.to));
-  const from = formatDate(report.range.from);
-  const to = formatDate(report.range.to);
-
-  xml = replaceParagraph(xml, "[01]", revenueExpenseMethod
-    ? `[01] Kỳ tính thuế: Năm ${year} Từ ${from} đến ${to}`
-    : `[01] Kỳ tính thuế: Năm ${year}`);
-  xml = replaceParagraph(xml, "[02]", "[02] Lần đầu ☒                        [03] Bổ sung lần thứ:");
-
-  if (revenueExpenseMethod) {
-    xml = replaceParagraph(xml, "[04]", `[04] Ngành nghề có tỷ lệ doanh thu cao nhất: ${tax.activityName}`);
-    xml = replaceParagraph(xml, "[05]", "[05] Tỷ lệ (%): 100 %");
-    xml = replaceParagraph(xml, "[06]", `[06] Tên người nộp thuế: ${tax.taxpayerName}`);
-    xml = replaceParagraph(xml, "[07]", `[07] Mã số thuế: ${tax.taxCode}`);
-    xml = fillTaxRevenueExpenseRows(xml, report.summary.netRevenue, tax);
-  } else {
-    xml = replaceParagraph(xml, "[04]", `[04] Tên người nộp thuế: ${tax.taxpayerName}`);
-    xml = replaceParagraph(xml, "[05]", `[05] Mã số thuế: ${tax.taxCode}`);
-    xml = fillTaxRevenueRows(xml, report.summary.netRevenue, tax);
-    xml = setTableRowLabel(xml, "1.1", `- Doanh thu từ hoạt động ${tax.activityName}`);
-    xml = setTableRowValue(xml, "1.1", formatMoney(report.summary.netRevenue));
-  }
-
-  zip.file("word/document.xml", xml);
-  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-}
-
-function fillTaxRevenueRows(xml: string, revenue: bigint, tax: TaxDeclarationInput): string {
-  const payable = percentOf(revenue, tax.taxRatePercent);
-  const afterRelief = maxBigInt(0n, payable - BigInt(tax.taxRelief));
-  const difference = afterRelief - BigInt(tax.provisionalTaxPaid);
-  const remaining = difference - BigInt(tax.priorOverpayment);
-  const values: Record<string, bigint> = {
-    "[11]": revenue,
-    "[12]": payable,
-    "[13]": BigInt(tax.taxRelief),
-    "[14]": afterRelief,
-    "[15]": BigInt(tax.priorOverpayment),
-    "[16]": BigInt(tax.provisionalTaxPaid),
-    "[17]": difference,
-    "[18]": remaining,
-  };
-  return fillMoneyRows(xml, values);
-}
-
-function fillTaxRevenueExpenseRows(xml: string, revenue: bigint, tax: TaxDeclarationInput): string {
-  const a1 = revenue - BigInt(tax.deductibleExpenses);
-  const b1 = BigInt(tax.adjustmentsIncrease);
-  const b8 = BigInt(tax.adjustmentsDecrease);
-  const b13 = a1 + b1 - b8;
-  const c1 = b13;
-  const c2 = BigInt(tax.exemptIncome);
-  const c3 = BigInt(tax.carriedLoss);
-  const c4 = maxBigInt(0n, c1 - c2 - c3);
-  const c5 = BigInt(tax.scienceFund);
-  const c6 = maxBigInt(0n, c4 - c5);
-  const c9 = percentOf(c6, tax.taxRatePercent);
-  const c10 = BigInt(tax.taxRelief);
-  const c17 = maxBigInt(0n, c9 - c10);
-  const g1 = BigInt(tax.priorOverpayment);
-  const g2 = BigInt(tax.provisionalTaxPaid);
-  const values: Record<string, bigint | number> = {
-    A1: a1,
-    B1: b1,
-    B7: b1,
-    B8: b8,
-    B12: b8,
-    B13: b13,
-    B14: b13,
-    B15: 0n,
-    C1: c1,
-    C2: c2,
-    C3: c3,
-    C3a: c3,
-    C3b: 0n,
-    C4: c4,
-    C5: c5,
-    C6: c6,
-    C7: c6,
-    C7a: tax.taxRatePercent,
-    C8: 0n,
-    C8a: 0,
-    C9: c9,
-    C10: c10,
-    C11: 0n,
-    C12: c10,
-    C13: 0n,
-    C14: 0n,
-    C15: 0n,
-    C16: 0n,
-    C17: c17,
-    D1: 0n,
-    D2: 0n,
-    D3: 0n,
-    D4: 0n,
-    D5: 0n,
-    D6: 0n,
-    D7: 0n,
-    D8: 0n,
-    E: c17,
-    E1: c17,
-    E2: 0n,
-    E3: 0n,
-    E4: 0n,
-    E5: 0n,
-    E6: 0n,
-    G: g1 + g2,
-    G1: g1,
-    G2: g2,
-    G3: 0n,
-    G4: 0n,
-    G5: 0n,
-    H: c17 - g2,
-    H1: c17 - g2,
-    H2: 0n,
-    H3: 0n,
-    I: c17 - g1 - g2,
-    "I1=E1+E5-G1-G2": c17 - g1 - g2,
-    "I2=E2-G3-G4-G5": 0n,
-  };
-  return fillMoneyRows(xml, values);
-}
-
-function fillMoneyRows(xml: string, values: Record<string, bigint | number>): string {
-  return xml.replace(/<w:tr[\s\S]*?<\/w:tr>/g, (row) => {
-    const cells = [...row.matchAll(/<w:tc[\s\S]*?<\/w:tc>/g)].map((match) => match[0]);
-    if (cells.length < 4) return row;
-    const code = cellText(cells[2]);
-    if (!(code in values)) return row;
-    const value = values[code];
-    const display = typeof value === "number" ? formatPercent(value) : formatMoney(value);
-    const updated = setCellText(cells[3], display);
-    return row.replace(cells[3], updated);
-  });
-}
-
-function setTableRowLabel(xml: string, stt: string, label: string): string {
-  return xml.replace(/<w:tr[\s\S]*?<\/w:tr>/g, (row) => {
-    const cells = [...row.matchAll(/<w:tc[\s\S]*?<\/w:tc>/g)].map((match) => match[0]);
-    if (cells.length < 4 || cellText(cells[0]) !== stt) return row;
-    return row.replace(cells[1], setCellText(cells[1], label));
-  });
-}
-
-function setTableRowValue(xml: string, stt: string, value: string): string {
-  return xml.replace(/<w:tr[\s\S]*?<\/w:tr>/g, (row) => {
-    const cells = [...row.matchAll(/<w:tc[\s\S]*?<\/w:tc>/g)].map((match) => match[0]);
-    if (cells.length < 4 || cellText(cells[0]) !== stt) return row;
-    return row.replace(cells[3], setCellText(cells[3], value));
-  });
-}
-
-function replaceParagraph(xml: string, prefix: string, value: string): string {
-  let replaced = false;
-  return xml.replace(/<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/g, (paragraph) => {
-    if (replaced || !cellText(paragraph).startsWith(prefix)) return paragraph;
-    replaced = true;
-    return setTextNodes(paragraph, value);
-  });
-}
-
-function setCellText(cell: string, value: string): string {
-  if (/<w:t(?: [^>]*)?>[\s\S]*?<\/w:t>/.test(cell)) return setTextNodes(cell, value);
-  return cell.replace(/<\/w:p>/, `<w:r><w:t>${escapeXml(value)}</w:t></w:r></w:p>`);
-}
-
-function setTextNodes(fragment: string, value: string): string {
-  let first = true;
-  return fragment.replace(/<w:t(?: [^>]*)?>[\s\S]*?<\/w:t>/g, (node) => {
-    const text = first ? escapeXml(value) : "";
-    first = false;
-    const open = node.match(/^<w:t(?: [^>]*)?>/)?.[0] ?? "<w:t>";
-    return `${open}${text}</w:t>`;
-  });
-}
-
-function cellText(fragment: string): string {
-  return [...fragment.matchAll(/<w:t(?: [^>]*)?>([\s\S]*?)<\/w:t>/g)]
-    .map((match) => decodeXml(match[1]))
-    .join("")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function escapeXml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function decodeXml(value: string): string {
-  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-
-function formatMoney(value: bigint): string {
-  return new Intl.NumberFormat("vi-VN").format(value);
-}
-
-function formatPercent(value: number): string {
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(value);
-}
-
-function percentOf(value: bigint, percent: number): bigint {
-  const basisPoints = BigInt(Math.round(percent * 100));
-  return (value * basisPoints + 5_000n) / 10_000n;
-}
-
-function maxBigInt(a: bigint, b: bigint): bigint {
-  return a > b ? a : b;
-}
-
-function parseBigInt(value: unknown): bigint {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number" && Number.isInteger(value)) return BigInt(value);
-  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
-  return 0n;
-}
-
 function formatDate(value: string | Date): string {
   return new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(value));
 }
 
 function localDateKey(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(value);
-}
-
-function defaultTemplateDirectory(): string {
-  const candidates = [
-    path.resolve(__dirname, "../../../../../../docs"),
-    path.resolve(__dirname, "../../../../../docs"),
-    path.resolve(process.cwd(), "../../docs"),
-    path.resolve(process.cwd(), "docs"),
-  ];
-  return candidates.find((candidate) => existsSync(path.join(candidate, "2._03.TNDN_2507200143.docx")))
-    ?? candidates[0];
 }

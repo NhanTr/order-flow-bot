@@ -1,0 +1,34 @@
+meta {
+  name: resolveReconciliation
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/reconciliations/{{reconciliationId}}/resolve
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "resolvedByUserId": "{{userId}}",
+    "resolutionAction": "ACCEPT",
+    "resolutionNote": "Reviewed using Bruno"
+  }
+}
+
+docs {
+  Resolve a reconciliation review transaction
+
+  Source: backend/docs/openapi.yaml
+
+}

@@ -45,3 +45,18 @@ export function requireAdminAuth(authService: AuthServicePort) {
 export function requireAdminAccess(authService: AuthServicePort) {
   return requireRoles(authService, ["OWNER", "SERVICE_STAFF"]);
 }
+
+export function requireAuthenticatedActor(request: Request): AccessIdentity {
+  if (!request.auth) {
+    throw new AppError("UNAUTHORIZED", "Authentication required");
+  }
+  return request.auth;
+}
+
+export function requireOwnerActor(request: Request): AccessIdentity {
+  const actor = requireAuthenticatedActor(request);
+  if (actor.role !== "OWNER") {
+    throw new AppError("FORBIDDEN", "Owner access is required");
+  }
+  return actor;
+}

@@ -18,6 +18,7 @@ import { prisma } from "../../db";
 const ORDER_INCLUDE = { items: true } as const;
 const ORDER_DETAIL_INCLUDE = { items: true, history: { orderBy: { createdAt: "asc" } } } as const;
 const ORDER_CODE_MAX_ATTEMPTS = 5;
+type OrderDatabase = Prisma.TransactionClient | typeof prisma;
 
 function toOrderWithTimeline(order: unknown): Order {
   const data = order as any;
@@ -45,15 +46,17 @@ export class OrderRepository {
     createdByUserId: string,
     paymentMethod:   any,
     customerNote:    string | undefined,
-    items:           Array<{ menuItemId: string; itemName: string; unitPrice: bigint; quantity: number; note?: string }>
+    items:           Array<{ menuItemId: string; itemName: string; unitPrice: bigint; quantity: number; note?: string }>,
+    database:        OrderDatabase = prisma,
   ): Promise<Order> {
     const totalAmount = calculateTotal(items);
+    const maxAttempts = database === prisma ? ORDER_CODE_MAX_ATTEMPTS : 1;
 
-    for (let attempt = 1; attempt <= ORDER_CODE_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const orderCode = generateOrderCode();
 
       try {
-        const order = await prisma.order.create({
+        const order = await database.order.create({
           data: {
             orderCode,
             createdByUserId,
@@ -75,7 +78,7 @@ export class OrderRepository {
 
         return order as unknown as Order;
       } catch (error) {
-        if (!isUniqueConstraintError(error) || attempt === ORDER_CODE_MAX_ATTEMPTS) {
+        if (!isUniqueConstraintError(error) || attempt === maxAttempts) {
           throw error;
         }
       }
@@ -87,8 +90,8 @@ export class OrderRepository {
   /**
    * Finds an order by ID with its items.
    */
-  public async findById(id: string): Promise<Order | null> {
-    const order = await prisma.order.findUnique({
+  public async findById(id: string, database: OrderDatabase = prisma): Promise<Order | null> {
+    const order = await database.order.findUnique({
       where: { id },
       include: ORDER_DETAIL_INCLUDE,
     });
@@ -144,17 +147,33 @@ export class OrderRepository {
     opts?: {
       assignedBaristaId?: string;
       cancellationReason?: string;
-    }
+    },
+    database: OrderDatabase = prisma,
+    expected?: {
+      fulfillmentStatus?: FulfillmentStatus;
+      paymentStatus?: PaymentStatus;
+      assignedBaristaId?: string | null;
+    },
   ): Promise<Order> {
     const data: any = { fulfillmentStatus };
     if (opts?.assignedBaristaId  !== undefined) data.assignedBaristaId  = opts.assignedBaristaId;
     if (opts?.cancellationReason !== undefined) data.cancellationReason = opts.cancellationReason;
 
-    const order = await prisma.order.update({
-      where:   { id },
-      data,
-      include: ORDER_INCLUDE,
-    });
+    if (expected) {
+      const updated = await database.order.updateMany({
+        where: { id, ...expected } as any,
+        data,
+      });
+      if (updated.count !== 1) {
+        const error = new Error("Order status changed concurrently") as Error & { code?: string };
+        error.code = "P2025";
+        throw error;
+      }
+    } else {
+      await database.order.update({ where: { id }, data });
+    }
+
+    const order = await database.order.findUnique({ where: { id }, include: ORDER_INCLUDE });
     return order as unknown as Order;
   }
 
@@ -165,16 +184,28 @@ export class OrderRepository {
   public async updatePaymentStatus(
     id:            string,
     paymentStatus: PaymentStatus,
-    opts?: { paidAt?: Date }
+    opts?: { paidAt?: Date },
+    database: OrderDatabase = prisma,
+    expectedPaymentStatus?: PaymentStatus,
   ): Promise<Order> {
     const data: any = { paymentStatus };
     if (opts?.paidAt !== undefined) data.paidAt = opts.paidAt;
 
-    const order = await prisma.order.update({
-      where:   { id },
-      data,
-      include: ORDER_INCLUDE,
-    });
+    if (expectedPaymentStatus) {
+      const updated = await database.order.updateMany({
+        where: { id, paymentStatus: expectedPaymentStatus as any },
+        data,
+      });
+      if (updated.count !== 1) {
+        const error = new Error("Order payment status changed concurrently") as Error & { code?: string };
+        error.code = "P2025";
+        throw error;
+      }
+    } else {
+      await database.order.update({ where: { id }, data });
+    }
+
+    const order = await database.order.findUnique({ where: { id }, include: ORDER_INCLUDE });
     return order as unknown as Order;
   }
 
@@ -183,9 +214,10 @@ export class OrderRepository {
    */
   public async addItem(
     orderId: string,
-    item:    { menuItemId: string; itemName: string; unitPrice: bigint; quantity: number; note?: string }
+    item:    { menuItemId: string; itemName: string; unitPrice: bigint; quantity: number; note?: string },
+    database: OrderDatabase = prisma,
   ): Promise<Order> {
-    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const execute = async (tx: Prisma.TransactionClient) => {
       await tx.orderItem.create({
         data: {
           orderId,
@@ -206,16 +238,24 @@ export class OrderRepository {
           paymentStatus: PaymentStatus.UNPAID as any,
           fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT as any,
         },
-        data:    { totalAmount: newTotal },
+        data: { totalAmount: newTotal },
       });
       if (updatedCount.count !== 1) {
         const error = new Error("Order is no longer editable") as Error & { code?: string };
         error.code = "P2025";
         throw error;
       }
+      await tx.payment.updateMany({
+        where: { orderId, confirmedAt: null, receivedAmount: BigInt(0) },
+        data: { expectedAmount: newTotal },
+      });
       const updated = await tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
       return updated as unknown as Order;
-    });
+    };
+
+    return database === prisma
+      ? prisma.$transaction(execute)
+      : execute(database as Prisma.TransactionClient);
   }
 
   /**
@@ -224,9 +264,10 @@ export class OrderRepository {
   public async updateItem(
     orderId: string,
     itemId:  string,
-    input:   UpdateItemInput
+    input:   UpdateItemInput,
+    database: OrderDatabase = prisma,
   ): Promise<Order> {
-    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const execute = async (tx: Prisma.TransactionClient) => {
       const existing = await tx.orderItem.findFirst({ where: { id: itemId, orderId } });
       if (!existing) {
         throw new Error(`Item ${itemId} not found in order ${orderId}`);
@@ -247,23 +288,35 @@ export class OrderRepository {
           paymentStatus: PaymentStatus.UNPAID as any,
           fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT as any,
         },
-        data:    { totalAmount: newTotal },
+        data: { totalAmount: newTotal },
       });
       if (updatedCount.count !== 1) {
         const error = new Error("Order is no longer editable") as Error & { code?: string };
         error.code = "P2025";
         throw error;
       }
+      await tx.payment.updateMany({
+        where: { orderId, confirmedAt: null, receivedAmount: BigInt(0) },
+        data: { expectedAmount: newTotal },
+      });
       const updated = await tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
       return updated as unknown as Order;
-    });
+    };
+
+    return database === prisma
+      ? prisma.$transaction(execute)
+      : execute(database as Prisma.TransactionClient);
   }
 
   /**
    * Deletes an order item and recalculates `totalAmount` — inside a transaction.
    */
-  public async deleteItem(orderId: string, itemId: string): Promise<Order> {
-    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  public async deleteItem(
+    orderId: string,
+    itemId: string,
+    database: OrderDatabase = prisma,
+  ): Promise<Order> {
+    const execute = async (tx: Prisma.TransactionClient) => {
       const existing = await tx.orderItem.findFirst({ where: { id: itemId, orderId } });
       if (!existing) {
         throw new Error(`Item ${itemId} not found in order ${orderId}`);
@@ -280,23 +333,35 @@ export class OrderRepository {
           paymentStatus: PaymentStatus.UNPAID as any,
           fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT as any,
         },
-        data:    { totalAmount: newTotal },
+        data: { totalAmount: newTotal },
       });
       if (updatedCount.count !== 1) {
         const error = new Error("Order is no longer editable") as Error & { code?: string };
         error.code = "P2025";
         throw error;
       }
+      await tx.payment.updateMany({
+        where: { orderId, confirmedAt: null, receivedAmount: BigInt(0) },
+        data: { expectedAmount: newTotal },
+      });
       const updated = await tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
       return updated as unknown as Order;
-    });
+    };
+
+    return database === prisma
+      ? prisma.$transaction(execute)
+      : execute(database as Prisma.TransactionClient);
   }
 
   /**
    * Looks up a specific item that belongs to the given order.
    */
-  public async findItemById(orderId: string, itemId: string): Promise<OrderItem | null> {
-    const item = await prisma.orderItem.findFirst({
+  public async findItemById(
+    orderId: string,
+    itemId: string,
+    database: OrderDatabase = prisma,
+  ): Promise<OrderItem | null> {
+    const item = await database.orderItem.findFirst({
       where: { id: itemId, orderId },
     });
     return item as unknown as OrderItem | null;

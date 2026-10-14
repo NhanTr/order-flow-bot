@@ -1,3 +1,5 @@
+import createHttpError from "http-errors";
+
 export interface RevenueQuery {
   from: Date;
   to: Date;
@@ -9,15 +11,19 @@ export function parseRevenueQuery(query: any): RevenueQuery {
   const to = parseDate(query.to, endOfToday(), "end");
 
   if (Number.isNaN(from.getTime())) {
-    throw Object.assign(new Error("from must be a valid ISO date"), { status: 400 });
+    throw createHttpError(400, "from must be a valid ISO date");
   }
 
   if (Number.isNaN(to.getTime())) {
-    throw Object.assign(new Error("to must be a valid ISO date"), { status: 400 });
+    throw createHttpError(400, "to must be a valid ISO date");
   }
 
   if (from > to) {
-    throw Object.assign(new Error("from must be before or equal to to"), { status: 400 });
+    throw createHttpError(400, "from must be before or equal to to");
+  }
+
+  if (inclusiveCalendarDays(from, to) > 366) {
+    throw createHttpError(400, "Revenue range must not exceed 366 days");
   }
 
   const groupBy = ["hour", "day", "week", "month"].includes(query.groupBy)
@@ -25,6 +31,22 @@ export function parseRevenueQuery(query: any): RevenueQuery {
     : "day";
 
   return { from, to, groupBy };
+}
+
+function inclusiveCalendarDays(from: Date, to: Date): number {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  const dayNumber = (value: Date) => {
+    const parts = Object.fromEntries(
+      formatter.formatToParts(value).map((part) => [part.type, part.value]),
+    );
+    return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  };
+  return Math.floor((dayNumber(to) - dayNumber(from)) / 86_400_000) + 1;
 }
 
 function parseDate(value: unknown, fallback: Date, boundary: "start" | "end"): Date {

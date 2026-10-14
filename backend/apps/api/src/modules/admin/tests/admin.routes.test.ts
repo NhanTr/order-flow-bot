@@ -169,7 +169,7 @@ afterEach(async () => {
 });
 
 describe("Admin order routes", () => {
-  it("allows owner and service staff to list and inspect orders", async () => {
+  it("allows only owners to list and inspect admin orders", async () => {
     const baseUrl = await startApi();
     const list = await request(baseUrl, "/orders");
     const detail = await request(baseUrl, "/orders/order-1");
@@ -189,22 +189,23 @@ describe("Admin order routes", () => {
     expect((await detail.json()).timeline).toHaveLength(1);
 
     const staffList = await request(baseUrl, "/orders", "GET", staffToken);
-    expect(staffList.status).toBe(200);
+    expect(staffList.status).toBe(403);
   });
 
   it("overrides status using the authenticated actor and requires a reason", async () => {
     const baseUrl = await startApi();
-    const response = await request(baseUrl, "/orders/order-1/override-status", "POST", staffToken, {
+    const response = await request(baseUrl, "/orders/order-1/override-status", "POST", ownerToken, {
       domain: "FULFILLMENT",
       status: "READY",
       reason: "Customer asked to expedite",
+      adminId: "forged-owner-id",
     });
 
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload).toMatchObject({ fulfillmentStatus: FulfillmentStatus.READY });
 
-    const bad = await request(baseUrl, "/orders/order-1/override-status", "POST", staffToken, {
+    const bad = await request(baseUrl, "/orders/order-1/override-status", "POST", ownerToken, {
       domain: "PAYMENT",
       status: "PAID",
     });
@@ -216,6 +217,27 @@ describe("Admin order routes", () => {
     const baseUrl = await startApi();
     const response = await request(baseUrl, "/orders", "GET", baristaToken);
     expect(response.status).toBe(403);
+  });
+
+  it("rejects missing authentication and service staff on financial and report routes", async () => {
+    const baseUrl = await startApi();
+    const protectedRequests = [
+      ["POST", "/orders/order-1/override-status"],
+      ["POST", "/orders/order-1/refund"],
+      ["GET", "/audit-logs"],
+      ["GET", "/revenue"],
+      ["GET", "/transactions"],
+      ["GET", "/reconciliations"],
+      ["POST", "/reconciliations/reconciliation-1/resolve"],
+    ] as const;
+
+    for (const [method, path] of protectedRequests) {
+      const body = method === "POST" ? {} : undefined;
+      expect((await request(baseUrl, path, method, staffToken, body)).status).toBe(403);
+    }
+
+    const anonymous = await fetch(`${baseUrl}/orders`, { method: "GET" });
+    expect(anonymous.status).toBe(401);
   });
 });
 

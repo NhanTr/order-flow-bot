@@ -1,0 +1,22 @@
+meta {
+  name: listOrderPayments
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/orders/{{orderId}}/payments
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List payment records for an order
+
+  Source: backend/docs/openapi.yaml
+
+}

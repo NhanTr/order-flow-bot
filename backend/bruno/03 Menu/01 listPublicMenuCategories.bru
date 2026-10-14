@@ -1,0 +1,18 @@
+meta {
+  name: listPublicMenuCategories
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/menu/categories
+  body: none
+  auth: none
+}
+
+docs {
+  List active public menu categories
+
+  Source: backend/docs/openapi.yaml
+
+}

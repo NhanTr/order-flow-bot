@@ -1,0 +1,17 @@
+{$PUBLIC_ORIGIN} {
+	encode zstd gzip
+
+	@sepay_webhook path /api/v1/sepay/webhook /api/v1/sepay/webhook/*
+	handle @sepay_webhook {
+		reverse_proxy api:3001
+	}
+
+	@telegram_webhook path {$TELEGRAM_WEBHOOK_PATH} {$TELEGRAM_WEBHOOK_PATH}/*
+	handle @telegram_webhook {
+		reverse_proxy telegram-bot:3002
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

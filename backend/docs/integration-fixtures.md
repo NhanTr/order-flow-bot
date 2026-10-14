@@ -7,21 +7,34 @@ accounts and menu data without manually preparing the database.
 npm run seed:be004
 ```
 
-The seed is idempotent and uses the `BE004` namespace. It upserts only the
-records listed here and does not delete unrelated data. The password below is
-for local development and integration smoke tests only.
+Menu/orders use the `BE004` namespace. All user-producing demo seeds reuse
+one shared account for each role. On an empty database this creates exactly
+three users; rerunning any demo seed does not create additional accounts.
+Existing unrelated or old seeded users are not deleted automatically.
 
 ## Users
 
-| Purpose | ID | Username | Password | Telegram user ID | DB role | Status | Bot role |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Admin manager | `00000000-0000-4000-8000-000000004001` | `be004_owner` | `be004-dev-password` | `94004001` | `OWNER` | `ACTIVE` | `MANAGER` |
-| Service staff | `00000000-0000-4000-8000-000000004002` | `be004_service_staff` | none | `94004002` | `SERVICE_STAFF` | `ACTIVE` | `SERVICE_STAFF` |
-| Barista | `00000000-0000-4000-8000-000000004003` | `be004_barista` | none | `94004003` | `BARISTA` | `ACTIVE` | `BARISTA` |
-| Inactive staff | `00000000-0000-4000-8000-000000004004` | `be004_inactive_staff` | none | `94004004` | `SERVICE_STAFF` | `INACTIVE` | blocked |
+Set `SEED_OWNER_PASSWORD` (at least 12 characters) in the repository `.env.local`
+before running a user-producing seed. There is no fallback password. Only its
+bcrypt hash is stored; neither password nor hash is included in seed output.
 
-The database does not have a `MANAGER` enum value. Bot session responses expose
-database `OWNER` users as Bot `MANAGER`.
+| Purpose | Username | Telegram user ID default | DB role | Status | Bot role |
+| --- | --- | --- | --- | --- | --- |
+| Admin manager | `SEED_OWNER_USERNAME` (default `owner`) | `94004001` | `OWNER` | `ACTIVE` | `MANAGER` |
+| Service staff | `service_staff` | `94004002` | `SERVICE_STAFF` | `ACTIVE` | `SERVICE_STAFF` |
+| Barista | `barista` | `94004003` | `BARISTA` | `ACTIVE` | `BARISTA` |
+
+User UUIDs are generated on first creation and reused by identity. OWNER uses
+password authentication; SERVICE_STAFF and BARISTA use Telegram and have no
+password. Configure real Telegram IDs using `SEED_OWNER_TELEGRAM_USER_ID`,
+`SEED_SERVICE_STAFF_TELEGRAM_USER_ID`, and `SEED_BARISTA_TELEGRAM_USER_ID`.
+The three IDs must differ. The seed refuses identity conflicts and implicit
+role changes, rolling back the user transaction on failure.
+
+Run `npm run seed:users` to create only these three accounts. `db:seed` continues
+to initialize only OWNER. For inactive-employee smoke tests, deactivate the
+shared staff account via the admin API and reactivate it afterward; no fourth
+fixture account is created. Database `OWNER` maps to Bot `MANAGER`.
 
 ## Menu
 
@@ -39,10 +52,10 @@ must exclude `BE004 Hidden Drinks` and `BE004 Inactive Mocha`.
 
 | Purpose | ID | Order code | Payment status | Fulfillment status | Creator | Payment code |
 | --- | --- | --- | --- | --- | --- | --- |
-| Barista smoke-test queue order | `00000000-0000-4000-8000-000000004301` | `BE004-QUEUED-001` | `PAID` | `QUEUED` | `be004_service_staff` | `PAY-BE004-QUEUED-001` |
+| Barista smoke-test queue order | `00000000-0000-4000-8000-000000004301` | `BE004-QUEUED-001` | `PAID` | `QUEUED` | `service_staff` | `PAY-BE004-QUEUED-001` |
 
 The queued order has one `BE004 Iced Latte`, total `45000`, and is unassigned
-so `be004_barista` can see it in the queue before claiming.
+so `barista` can see it in the queue before claiming.
 
 ## Required Headers
 
@@ -66,5 +79,5 @@ Expected smoke-test results:
 | --- | --- | --- |
 | `94004002` | `/telegram/bot/session` | `200` with role `SERVICE_STAFF` |
 | `94004001` | `/telegram/bot/session` | `200` with role `MANAGER` |
-| `94004004` | `/telegram/bot/session` | `403` with code `EMPLOYEE_INACTIVE` |
+| deactivated shared staff | `/telegram/bot/session` | `403` with code `EMPLOYEE_INACTIVE` |
 | `94004003` | `/barista/queue` | queue can include `BE004-QUEUED-001` |

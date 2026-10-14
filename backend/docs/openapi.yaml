@@ -9,6 +9,13 @@ info:
 
     Operations marked `x-implementation-status: implemented` exist in the
     current API. Operations marked `planned` are contracts for upcoming work.
+
+    Web order/payment operations require an authenticated OWNER or SERVICE_STAFF;
+    staff can access only their own orders and list filters are server-scoped.
+    Admin order/financial/report routes and web barista routes require OWNER.
+    Acting identities come from the verified session. Legacy actor fields are
+    ignored for one compatibility release and should be omitted by new clients.
+    Known forbidden objects return 403; unknown order IDs return 404.
 servers:
   - url: http://localhost:3001
     description: Local development
@@ -391,6 +398,77 @@ paths:
                 $ref: "#/components/schemas/Order"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/orders/{orderId}/ready:
+    post:
+      tags: [Service Orders]
+      operationId: markOrderReady
+      summary: OWNER marks a preparing order ready with a reason
+      x-implementation-status: implemented
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelOrderRequest"
+      responses:
+        "200":
+          description: Updated order with authenticated OWNER history attribution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/orders/{orderId}/deliver:
+    post:
+      tags: [Service Orders]
+      operationId: deliverOrder
+      summary: OWNER or owning staff delivers a READY order
+      description: OWNER must give a reason when acting on another creator's order.
+      x-implementation-status: implemented
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderIdPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Delivered order with authenticated actor history attribution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -1240,8 +1318,8 @@ paths:
     post:
       tags: [Admin Finance]
       operationId: exportRevenueReport
-      summary: Export accounting XLSX or template-based TNDN DOCX
-      description: The XLSX includes related orders, Payments, SePay transactions, refunds, formula-driven accounting tie-outs and color-coded annotated exceptions. DOCX formats retain the supplied 03/04-TNDN templates.
+      summary: Export accounting XLSX
+      description: The XLSX includes related orders, Payments, SePay transactions, refunds, formula-driven accounting tie-outs and color-coded annotated exceptions.
       x-implementation-status: implemented
       security:
         - bearerAuth: []
@@ -1266,57 +1344,16 @@ paths:
               properties:
                 format:
                   type: string
-                  enum: [xlsx, tax-revenue, tax-revenue-expense]
-                taxpayerName:
-                  type: string
-                taxCode:
-                  type: string
-                activityName:
-                  type: string
-                taxRatePercent:
-                  type: number
-                  minimum: 0
-                  maximum: 100
-                deductibleExpenses:
-                  type: integer
-                  minimum: 0
-                adjustmentsIncrease:
-                  type: integer
-                  minimum: 0
-                adjustmentsDecrease:
-                  type: integer
-                  minimum: 0
-                exemptIncome:
-                  type: integer
-                  minimum: 0
-                carriedLoss:
-                  type: integer
-                  minimum: 0
-                scienceFund:
-                  type: integer
-                  minimum: 0
-                taxRelief:
-                  type: integer
-                  minimum: 0
-                priorOverpayment:
-                  type: integer
-                  minimum: 0
-                provisionalTaxPaid:
-                  type: integer
-                  minimum: 0
+                  enum: [xlsx]
       responses:
         "200":
-          description: Generated XLSX or DOCX attachment
+          description: Generated XLSX attachment
           headers:
             Content-Disposition:
               schema:
                 type: string
           content:
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
-              schema:
-                type: string
-                format: binary
-            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
               schema:
                 type: string
                 format: binary
@@ -1544,20 +1581,14 @@ components:
     ConfirmCashPaymentRequest:
       type: object
       additionalProperties: false
-      required: [confirmedByUserId]
       properties:
-        confirmedByUserId:
-          type: string
         amount:
           type: integer
           minimum: 0
     InitQrPaymentRequest:
       type: object
       additionalProperties: false
-      required: [requestedByUserId]
-      properties:
-        requestedByUserId:
-          type: string
+      properties: {}
     PaymentRecord:
       type: object
       required: [id, orderId, method, status, expectedAmount, createdAt, updatedAt]
@@ -1661,10 +1692,8 @@ components:
     ResolveReconciliationRequest:
       type: object
       additionalProperties: false
-      required: [resolvedByUserId, resolutionAction, resolutionNote]
+      required: [resolutionAction, resolutionNote]
       properties:
-        resolvedByUserId:
-          type: string
         resolutionAction:
           $ref: "#/components/schemas/ResolutionAction"
         resolutionNote:
@@ -1673,10 +1702,8 @@ components:
     RefundOrderRequest:
       type: object
       additionalProperties: false
-      required: [refundedByUserId, reason]
+      required: [reason]
       properties:
-        refundedByUserId:
-          type: string
         reason:
           type: string
           minLength: 1
@@ -1699,10 +1726,8 @@ components:
     CreateOrderRequest:
       type: object
       additionalProperties: false
-      required: [createdByUserId, items]
+      required: [items]
       properties:
-        createdByUserId:
-          type: string
         paymentMethod:
           $ref: "#/components/schemas/PaymentMethod"
         customerNote:
@@ -1720,8 +1745,6 @@ components:
         reason:
           type: string
           minLength: 1
-        requesterId:
-          type: string
     AddOrderItemRequest:
       type: object
       additionalProperties: false

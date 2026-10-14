@@ -1,0 +1,22 @@
+meta {
+  name: listOrders
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/orders
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  List service orders
+
+  Source: backend/docs/openapi.yaml
+
+}

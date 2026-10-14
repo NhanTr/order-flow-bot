@@ -1,0 +1,32 @@
+meta {
+  name: updateEmployee
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/admin/employees/{{employeeId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "fullName": "Updated Bruno Service Staff"
+  }
+}
+
+docs {
+  Partially update an employee
+
+  Source: backend/docs/openapi.yaml
+
+}
