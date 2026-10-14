@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "../../db";
 import { PUBLIC_USER_SELECT } from "../auth/public-user.select";
+import type { PaginationParams } from "../../middleware/pagination";
 
 export interface ResolveReconciliationInput {
   resolvedByUserId: string;
@@ -18,14 +19,20 @@ export interface ResolveReconciliationInput {
 export class ReconciliationService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
-  public async listTransactions() {
-    return this.db.sepayTransaction.findMany({
-      include: {
-        payment: { include: { order: true } },
-        resolvedBy: { select: PUBLIC_USER_SELECT },
-      },
-      orderBy: { receivedAt: "desc" },
-    });
+  public async listTransactions(pagination: PaginationParams = { page: 1, limit: 20, skip: 0 }) {
+    const [data, total] = await Promise.all([
+      this.db.sepayTransaction.findMany({
+        include: {
+          payment: { include: { order: true } },
+          resolvedBy: { select: PUBLIC_USER_SELECT },
+        },
+        orderBy: { receivedAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.db.sepayTransaction.count(),
+    ]);
+    return { data, total, page: pagination.page, limit: pagination.limit };
   }
 
   public async getTransaction(transactionId: string) {
@@ -41,20 +48,27 @@ export class ReconciliationService {
     return transaction;
   }
 
-  public async listReconciliations() {
-    return this.db.sepayTransaction.findMany({
-      where: {
+  public async listReconciliations(pagination: PaginationParams = { page: 1, limit: 20, skip: 0 }) {
+    const where = {
         OR: [
           { matchStatus: TransactionMatchStatus.UNMATCHED },
           { matchStatus: TransactionMatchStatus.WRONG_CODE },
         ],
-      },
-      include: {
-        payment: { include: { order: true } },
-        resolvedBy: { select: PUBLIC_USER_SELECT },
-      },
-      orderBy: { receivedAt: "desc" },
-    });
+      };
+    const [data, total] = await Promise.all([
+      this.db.sepayTransaction.findMany({
+        where,
+        include: {
+          payment: { include: { order: true } },
+          resolvedBy: { select: PUBLIC_USER_SELECT },
+        },
+        orderBy: { receivedAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      this.db.sepayTransaction.count({ where }),
+    ]);
+    return { data, total, page: pagination.page, limit: pagination.limit };
   }
 
   public async getReconciliation(reconciliationId: string) {

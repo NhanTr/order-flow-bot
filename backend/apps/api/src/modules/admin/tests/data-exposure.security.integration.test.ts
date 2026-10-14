@@ -155,8 +155,8 @@ describe.skipIf(!database)("safe user relations disposable-database acceptance",
     expectSafeUser(detail?.assignedBarista, barista);
 
     const auditLogs = await new AuditService().listAuditLogs();
-    const actorLog = auditLogs.find((log) => log.action === marker);
-    const nullActorLog = auditLogs.find((log) => log.action === `${marker}_NULL`);
+    const actorLog = auditLogs.data.find((log) => log.action === marker);
+    const nullActorLog = auditLogs.data.find((log) => log.action === `${marker}_NULL`);
     expectSafeUser(actorLog?.actor, owner);
     expect(nullActorLog?.actor).toBeNull();
 
@@ -166,9 +166,9 @@ describe.skipIf(!database)("safe user relations disposable-database acceptance",
     const reconciliations = await reconciliationService.listReconciliations();
     const reconciliation = await reconciliationService.getReconciliation(transactionId);
 
-    expect(transactions.find((item) => item.id === transactionId)?.resolvedBy).toBeNull();
+    expect(transactions.data.find((item) => item.id === transactionId)?.resolvedBy).toBeNull();
     expect(transaction.resolvedBy).toBeNull();
-    expect(reconciliations.find((item) => item.id === transactionId)?.resolvedBy).toBeNull();
+    expect(reconciliations.data.find((item) => item.id === transactionId)?.resolvedBy).toBeNull();
     expect(reconciliation.resolvedBy).toBeNull();
 
     const resolved = await reconciliationService.resolveReconciliation(transactionId, {
@@ -189,12 +189,12 @@ describe.skipIf(!database)("safe user relations disposable-database acceptance",
     const reconciliationAfterResolve = await reconciliationService.getReconciliation(transactionId);
 
     expectSafeUser(
-      transactionsAfterResolve.find((item) => item.id === transactionId)?.resolvedBy,
+      transactionsAfterResolve.data.find((item) => item.id === transactionId)?.resolvedBy,
       owner,
     );
     expectSafeUser(transactionAfterResolve.resolvedBy, owner);
     expectSafeUser(
-      reconciliationsAfterResolve.find((item) => item.id === transactionId)?.resolvedBy,
+      reconciliationsAfterResolve.data.find((item) => item.id === transactionId)?.resolvedBy,
       owner,
     );
     expectSafeUser(reconciliationAfterResolve.resolvedBy, owner);

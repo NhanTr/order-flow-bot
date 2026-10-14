@@ -9,6 +9,7 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
   },
   auditLog: {
+    count: vi.fn(),
     findMany: vi.fn(),
   },
 }));
@@ -166,6 +167,7 @@ describe("safe response user relations", () => {
   });
 
   it("audit_actor_omits_credentials", async () => {
+    prismaMock.auditLog.count.mockResolvedValue(2);
     prismaMock.auditLog.findMany.mockImplementation(async (args) => [
       {
         id: "audit-1",
@@ -182,14 +184,17 @@ describe("safe response user relations", () => {
     expect(prismaMock.auditLog.findMany).toHaveBeenCalledWith({
       include: { actor: { select: SAFE_USER_SELECT } },
       orderBy: { createdAt: "desc" },
+      skip: 0,
+      take: 20,
     });
-    expectSafeSerializedUser(logs[0].actor);
-    expect(logs[1].actor).toBeNull();
+    expectSafeSerializedUser(logs.data[0].actor);
+    expect(logs.data[1].actor).toBeNull();
     expect(JSON.stringify(logs)).not.toContain("SENTINEL_HASH");
   });
 
   it("reconciliation_resolver_omits_credentials", async () => {
     const sepayTransaction = {
+      count: vi.fn().mockResolvedValue(1),
       findMany: vi.fn(async (args) => [{
         id: "transaction-list",
         resolvedBy: projectUser(args.include.resolvedBy, privateUser),
@@ -253,9 +258,9 @@ describe("safe response user relations", () => {
       select: SAFE_USER_SELECT,
     });
 
-    expectSafeSerializedUser(transactions[0].resolvedBy);
+    expectSafeSerializedUser(transactions.data[0].resolvedBy);
     expect(transaction.resolvedBy).toBeNull();
-    expectSafeSerializedUser(reconciliations[0].resolvedBy);
+    expectSafeSerializedUser(reconciliations.data[0].resolvedBy);
     expectSafeSerializedUser(reconciliation.resolvedBy);
     expectSafeSerializedUser(resolved.resolvedBy);
     expect(JSON.stringify({ transactions, transaction, reconciliations, reconciliation, resolved }))

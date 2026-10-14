@@ -1,4 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
+import express from "express";
+import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePagination } from "../../../middleware/pagination";
@@ -18,6 +20,15 @@ import { OrderController } from "../../orders/order.controller";
 import { AdminController } from "../admin.controller";
 import type { OrderService } from "../../orders/order.service";
 import type { AdminService } from "../admin.service";
+import { AuditController } from "../../audit/audit.controller";
+import { AuditService } from "../../audit/audit.service";
+import { ReconciliationController } from "../../reconciliations/reconciliation.controller";
+import { ReconciliationService } from "../../reconciliations/reconciliation.service";
+import { parseRevenueQuery } from "../../reports/revenue.validation";
+import { RevenueExportService } from "../../reports/revenue-export.service";
+import { createRequestBodyParsers } from "../../../middleware/request-limits";
+import { errorHandler } from "../../../middleware/error-handler";
+import { requestId } from "../../../middleware/request-id";
 
 // ═══════════════════════════════════════════════════════════════════
 //  parsePagination
@@ -493,5 +504,113 @@ describe("OrderController rejects bounded input at 400 before service", () => {
     await controller.cancelOrder(req, response, next);
     expect(response.status).toHaveBeenCalledWith(400);
     expect(service.cancelOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe("bounded audit and reconciliation lists", () => {
+  it("bounds audit reads in PostgreSQL and returns a page envelope", async () => {
+    const db = {
+      auditLog: {
+        count: vi.fn().mockResolvedValue(43),
+        findMany: vi.fn().mockResolvedValue([{ id: "audit-21" }]),
+      },
+    };
+    const result = await new AuditService(db as never).listAuditLogs({ page: 3, limit: 10, skip: 20 });
+
+    expect(db.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
+    expect(result).toEqual({ data: [{ id: "audit-21" }], total: 43, page: 3, limit: 10 });
+  });
+
+  it.each(["listTransactions", "listReconciliations"] as const)(
+    "bounds %s reads in PostgreSQL and returns a page envelope",
+    async (method) => {
+      const db = {
+        sepayTransaction: {
+          count: vi.fn().mockResolvedValue(25),
+          findMany: vi.fn().mockResolvedValue([{ id: "transaction-11" }]),
+        },
+      };
+      const result = await new ReconciliationService(db as never)[method]({ page: 2, limit: 10, skip: 10 });
+
+      expect(db.sepayTransaction.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 10, take: 10 }));
+      expect(result).toEqual({ data: [{ id: "transaction-11" }], total: 25, page: 2, limit: 10 });
+    },
+  );
+
+  it.each([
+    ["audit", (service: any) => new AuditController(service).listAuditLogs],
+    ["transactions", (service: any) => new ReconciliationController(service).listTransactions],
+    ["reconciliations", (service: any) => new ReconciliationController(service).listReconciliations],
+  ] as const)("rejects invalid %s pagination before service work", async (_name, handlerFactory) => {
+    const service = {
+      listAuditLogs: vi.fn(),
+      listTransactions: vi.fn(),
+      listReconciliations: vi.fn(),
+    };
+    const response = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+    const next = vi.fn();
+
+    await handlerFactory(service)({ query: { limit: "101" } } as unknown as Request, response, next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    expect(service.listAuditLogs).not.toHaveBeenCalled();
+    expect(service.listTransactions).not.toHaveBeenCalled();
+    expect(service.listReconciliations).not.toHaveBeenCalled();
+  });
+});
+
+describe("revenue and export bounds", () => {
+  it("accepts a 366-day inclusive range and rejects 367 days", () => {
+    expect(() => parseRevenueQuery({ from: "2024-01-01", to: "2024-12-31" })).not.toThrow();
+    expect(() => parseRevenueQuery({ from: "2024-01-01", to: "2025-01-01" })).toThrow(
+      expect.objectContaining({ statusCode: 400 }),
+    );
+  });
+
+  it("rejects an export with 10001 orders before report or workbook generation", async () => {
+    const db = { order: { count: vi.fn().mockResolvedValue(10_001) } };
+    const reportService = { getRevenueReport: vi.fn() };
+    const service = new RevenueExportService(db as never, reportService as never);
+
+    await expect(service.export({
+      format: "xlsx",
+      from: new Date("2026-01-01T00:00:00+07:00"),
+      to: new Date("2026-01-31T23:59:59.999+07:00"),
+    })).rejects.toMatchObject({ statusCode: 413 });
+    expect(reportService.getRevenueReport).not.toHaveBeenCalled();
+  });
+});
+
+describe("request parser limits", () => {
+  function parserApp(limit: string) {
+    const app = express();
+    app.use(requestId);
+    for (const parser of createRequestBodyParsers({ jsonLimit: limit, urlencodedLimit: limit })) {
+      app.use(parser);
+    }
+    app.post("/body", (req, res) => res.json({ data: req.body }));
+    app.use(errorHandler);
+    return app;
+  }
+
+  it("maps malformed JSON to a typed 400 without parser internals", async () => {
+    const response = await request(parserApp("1kb"))
+      .post("/body")
+      .set("content-type", "application/json")
+      .send('{"broken":');
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatchObject({ code: "VALIDATION_ERROR", message: "Malformed request body" });
+    expect(JSON.stringify(response.body)).not.toContain("SyntaxError");
+  });
+
+  it("maps oversized JSON to a typed 413 without echoing the body", async () => {
+    const response = await request(parserApp("100b"))
+      .post("/body")
+      .send({ value: "x".repeat(200) });
+
+    expect(response.status).toBe(413);
+    expect(response.body.error).toMatchObject({ code: "PAYLOAD_TOO_LARGE", message: "Request body is too large" });
+    expect(JSON.stringify(response.body)).not.toContain("xxx");
   });
 });

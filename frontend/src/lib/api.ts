@@ -344,29 +344,12 @@ export function getRevenueReport(from: string, to: string, groupBy: string = "da
   );
 }
 
-export type RevenueExportFormat = "xlsx" | "tax-revenue" | "tax-revenue-expense";
-
-export interface TaxDeclarationExportInput {
-  taxpayerName: string;
-  taxCode: string;
-  activityName: string;
-  taxRatePercent: number;
-  deductibleExpenses: number;
-  adjustmentsIncrease: number;
-  adjustmentsDecrease: number;
-  exemptIncome: number;
-  carriedLoss: number;
-  scienceFund: number;
-  taxRelief: number;
-  priorOverpayment: number;
-  provisionalTaxPaid: number;
-}
+export type RevenueExportFormat = "xlsx";
 
 export async function downloadRevenueExport(
   from: string,
   to: string,
   format: RevenueExportFormat,
-  tax?: TaxDeclarationExportInput,
 ): Promise<void> {
   const response = await fetch(
     `/api/backend/admin/reports/revenue/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
@@ -374,7 +357,7 @@ export async function downloadRevenueExport(
       method: "POST",
       cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ format, ...(tax ?? {}) }),
+      body: JSON.stringify({ format }),
     },
   );
 
@@ -386,7 +369,7 @@ export async function downloadRevenueExport(
   const blob = await response.blob();
   const disposition = response.headers.get("content-disposition") ?? "";
   const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
-    ?? (format === "xlsx" ? "so-doanh-thu.xlsx" : "to-khai-thue.docx");
+    ?? "so-doanh-thu.xlsx";
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

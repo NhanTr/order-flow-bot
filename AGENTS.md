@@ -109,8 +109,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 ## Progress log — 2026-08-14
 
-- Added three OWNER report exports to the revenue page: an accounting-oriented XLSX, a 04/TNDN revenue-method DOCX, and a 03/TNDN revenue-expense DOCX.
-- DOCX exports retain the two source templates in `backend/docs`, fill revenue from PostgreSQL, and require the user to confirm tax identity, rate, expense and adjustment inputs that Order Flow does not store.
+- The OWNER revenue page exports one accounting-oriented XLSX. The former 03/04-TNDN DOCX exports were removed because their required source templates were not part of the repository.
 - XLSX export provides summary, issue register, order/Payment/SePay/refund detail, journal and daily reconciliation sheets. Formula-driven checks reconcile order totals, expected/received amounts, bank transactions and cumulative refunds; colored bold cells and comments identify each exception and remediation. The workbook retains an explicit scope note for missing VAT/input-invoice/expense data.
 
 ## Progress log — 2026-08-12
