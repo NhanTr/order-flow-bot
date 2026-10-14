@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SepayApiClient, SepayApiClientError } from "../sepay-api.client";
+import { SepayApiClient } from "../sepay-api.client";
 
 const input = {
   accountNumber: "0337990731",
@@ -19,8 +19,10 @@ describe("SepayApiClient", () => {
     const client = new SepayApiClient("token", fetchImpl);
 
     await expect(client.findIncomingTransaction(input)).resolves.toMatchObject({
-      id: "1",
-      transferAmount: "5000",
+      externalId: "1",
+      accountNumber: input.accountNumber,
+      direction: "in",
+      amountIn: 5_000n,
       content: `MBVCB ${input.paymentCode}`,
     });
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -63,9 +65,9 @@ describe("SepayApiClient", () => {
     );
 
     await expect(client.findIncomingTransaction(input)).resolves.toMatchObject({
-      id: transactionId,
-      transferAmount: "5000",
-      transferType: "in",
+      externalId: transactionId,
+      amountIn: 5_000n,
+      direction: "in",
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -105,12 +107,63 @@ describe("SepayApiClient", () => {
       fetchImpl,
       "https://userapi.sepay.vn/v2/transactions",
     ).findIncomingTransaction(input)).resolves.toMatchObject({
-      id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      externalId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    });
+  });
+
+  it.each([
+    ["2026-08-10T22:35:13+07:00", true],
+    ["2026-08-10T22:35:12+07:00", false],
+  ])("enforces the existing 60-second timestamp boundary", async (transactionDate, matches) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: "success",
+      data: [{
+        id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        account_number: input.accountNumber,
+        transaction_date: transactionDate,
+        transfer_type: "in",
+        amount_in: 5_000,
+        amount_out: 0,
+        code: input.paymentCode,
+        transaction_content: input.paymentCode,
+      }],
+    }), { status: 200 }));
+
+    const result = await new SepayApiClient(
+      "token",
+      fetchImpl,
+      "https://userapi.sepay.vn/v2/transactions",
+    ).findIncomingTransaction(input);
+    expect(result !== null).toBe(matches);
+  });
+
+  it("rejects unsafe numeric amounts from the SePay API response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: "success",
+      data: [{
+        id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        account_number: input.accountNumber,
+        transaction_date: "2026-08-10T22:37:00+07:00",
+        transfer_type: "in",
+        amount_in: Number.MAX_SAFE_INTEGER + 1,
+        amount_out: 0,
+        code: input.paymentCode,
+        transaction_content: input.paymentCode,
+      }],
+    }), { status: 200 }));
+
+    await expect(new SepayApiClient(
+      "token",
+      fetchImpl,
+      "https://userapi.sepay.vn/v2/transactions",
+    ).findIncomingTransaction(input)).rejects.toMatchObject({
+      statusCode: 502,
+      code: "SEPAY_API_RESPONSE_INVALID",
     });
   });
 
   it("fails closed when the API token is missing", async () => {
-    await expect(new SepayApiClient("").findIncomingTransaction(input)).rejects.toMatchObject<SepayApiClientError>({
+    await expect(new SepayApiClient("").findIncomingTransaction(input)).rejects.toMatchObject({
       statusCode: 503,
       code: "SEPAY_API_NOT_CONFIGURED",
     });

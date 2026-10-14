@@ -122,3 +122,23 @@ test("admin auth routes reject invalid input and missing bearer token", async ()
   assert.equal(invalidCredentials.status, 401);
   assert.equal(invalidCredentials.body.error.code, "INVALID_CREDENTIALS");
 });
+
+test("debug session route is unavailable in every environment", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  try {
+    for (const nodeEnv of ["development", "test", "production"]) {
+      process.env.NODE_ENV = nodeEnv;
+      const app = createApp({ authService: new FakeAuthService() });
+      const response = await request(app).get("/api/v1/admin/auth/debug/sessions");
+
+      assert.equal(response.status, 404, `NODE_ENV=${nodeEnv}`);
+    }
+  } finally {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  }
+});

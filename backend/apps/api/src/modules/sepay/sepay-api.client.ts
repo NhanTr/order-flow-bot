@@ -1,3 +1,9 @@
+import {
+  NormalizedSepayTransaction,
+  normalizeSepayTransaction,
+  SepayTransactionNormalizationError,
+} from "./sepay-transaction";
+
 export interface SepayTransactionLookupInput {
   accountNumber: string;
   amount: bigint;
@@ -6,7 +12,7 @@ export interface SepayTransactionLookupInput {
 }
 
 export interface SepayTransactionLookup {
-  findIncomingTransaction(input: SepayTransactionLookupInput): Promise<Record<string, unknown> | null>;
+  findIncomingTransaction(input: SepayTransactionLookupInput): Promise<NormalizedSepayTransaction | null>;
 }
 
 export class SepayApiClientError extends Error {
@@ -20,36 +26,6 @@ export class SepayApiClientError extends Error {
   }
 }
 
-interface SepayApiTransaction {
-  id?: string | number;
-  account_number?: string;
-  transaction_date?: string;
-  amount_in?: string | number;
-  amount_out?: string | number;
-  code?: string | null;
-  transaction_content?: string;
-  reference_number?: string | null;
-  accumulated?: string | number;
-  bank_brand_name?: string;
-  sub_account?: string | null;
-  transfer_type?: "in" | "out";
-}
-
-function integerAmount(value: string | number | undefined): bigint | null {
-  if (value === undefined) return null;
-  const normalized = String(value).trim();
-  if (!/^\d+(?:\.0+)?$/.test(normalized)) return null;
-  return BigInt(normalized.split(".")[0]);
-}
-
-function transactionTimestamp(value: string | undefined): number | null {
-  if (!value) return null;
-  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
-    ? value
-    : `${value.replace(" ", "T")}+07:00`;
-  const timestamp = new Date(normalized).getTime();
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
 
 function sepayLocalDateTime(value: Date): string {
   return new Date(value.getTime() + 7 * 60 * 60 * 1_000)
@@ -66,7 +42,7 @@ export class SepayApiClient implements SepayTransactionLookup {
       || "https://my.sepay.vn/userapi/transactions/list",
   ) {}
 
-  public async findIncomingTransaction(input: SepayTransactionLookupInput): Promise<Record<string, unknown> | null> {
+  public async findIncomingTransaction(input: SepayTransactionLookupInput): Promise<NormalizedSepayTransaction | null> {
     if (!this.apiToken) {
       throw new SepayApiClientError(503, "SEPAY_API_NOT_CONFIGURED", "SePay API token is not configured");
     }
@@ -114,44 +90,38 @@ export class SepayApiClient implements SepayTransactionLookup {
     }
 
     const payload = await response.json().catch(() => null) as {
-      data?: SepayApiTransaction[];
-      transactions?: SepayApiTransaction[];
+      data?: unknown[];
+      transactions?: unknown[];
     } | null;
     const transactions = isV2 ? payload?.data : payload?.transactions;
     if (!Array.isArray(transactions)) {
       throw new SepayApiClientError(502, "SEPAY_API_RESPONSE_INVALID", "SePay transaction API returned invalid data");
     }
 
+    let normalizedTransactions: NormalizedSepayTransaction[];
+    try {
+      normalizedTransactions = transactions.map((transaction) => normalizeSepayTransaction(
+        transaction,
+        isV2 ? "api-v2" : "api-v1",
+      ));
+    } catch (error) {
+      if (error instanceof SepayTransactionNormalizationError) {
+        throw new SepayApiClientError(502, "SEPAY_API_RESPONSE_INVALID", "SePay transaction API returned invalid data");
+      }
+      throw error;
+    }
+
     const paymentCode = input.paymentCode.toUpperCase();
-    const transaction = transactions.find((candidate) => {
-      const content = candidate.transaction_content?.toUpperCase() ?? "";
-      const code = candidate.code?.toUpperCase() ?? "";
-      const timestamp = transactionTimestamp(candidate.transaction_date);
+    return normalizedTransactions.find((candidate) => {
+      const content = candidate.content.toUpperCase();
+      const code = candidate.paymentCode?.toUpperCase() ?? "";
       return (
-        String(candidate.account_number ?? "") === input.accountNumber
-        && integerAmount(candidate.amount_in) === input.amount
-        && integerAmount(candidate.amount_out) === 0n
-        && (candidate.transfer_type === undefined || candidate.transfer_type === "in")
+        candidate.accountNumber === input.accountNumber
+        && candidate.amountIn === input.amount
+        && candidate.direction === "in"
         && (code === paymentCode || content.includes(paymentCode))
-        && timestamp !== null
-        && timestamp >= input.createdAt.getTime() - 60_000
+        && candidate.transactionDate.getTime() >= input.createdAt.getTime() - 60_000
       );
-    });
-
-    if (!transaction || transaction.id === undefined) return null;
-
-    return {
-      id: String(transaction.id),
-      gateway: transaction.bank_brand_name,
-      transactionDate: transaction.transaction_date,
-      accountNumber: transaction.account_number,
-      subAccount: transaction.sub_account,
-      code: transaction.code,
-      content: transaction.transaction_content,
-      transferType: "in",
-      transferAmount: integerAmount(transaction.amount_in)?.toString(),
-      accumulated: transaction.accumulated,
-      referenceCode: transaction.reference_number,
-    };
+    }) ?? null;
   }
 }
