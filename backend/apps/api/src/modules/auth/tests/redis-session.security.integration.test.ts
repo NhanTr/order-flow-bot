@@ -12,7 +12,7 @@ import type { AuthUser, AuthUserWithPassword } from "../auth.types";
 
 const testRedisUrl = process.env.TEST_REDIS_URL;
 const runIntegration = testRedisUrl ? describe : describe.skip;
-const prefix = `order-flow:test:sessions:${randomUUID()}`;
+const prefix = `order-flow:auth-session:v1:test:${randomUUID()}`;
 let firstClient: RedisClientType | undefined;
 let secondClient: RedisClientType | undefined;
 
@@ -84,11 +84,9 @@ runIntegration("Redis authentication sessions", () => {
 
   afterAll(async () => {
     if (secondClient?.isOpen) {
-      const keys = [prefix];
-      for await (const key of secondClient.scanIterator({ MATCH: `${prefix}:*`, COUNT: 100 })) {
-        keys.push(key);
+      for await (const keys of secondClient.scanIterator({ MATCH: `${prefix}:*`, COUNT: 100 })) {
+        if (keys.length > 0) await secondClient.del(keys);
       }
-      await Promise.all(keys.slice(1).map((key) => secondClient!.del(key)));
     }
     await Promise.allSettled([
       firstClient?.isOpen ? firstClient.quit() : undefined,

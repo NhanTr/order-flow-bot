@@ -19,9 +19,11 @@ vi.mock("@prisma/client", () => ({
   AuditEntityType: {
     PAYMENT: "PAYMENT",
   },
-  PrismaClient: vi.fn(() => ({
-    $transaction: vi.fn((callback) => callback(tx)),
-  })),
+  PrismaClient: vi.fn(function PrismaClientMock() {
+    return {
+      $transaction: vi.fn((callback) => callback(tx)),
+    };
+  }),
 }));
 
 describe("RefundService", () => {

@@ -11,6 +11,7 @@ order-flow/
 ├── AGENTS.md                         # This persistent project map
 ├── compose.yaml                      # Pull-and-run production container stack
 ├── DOCKER_DEPLOYMENT.md              # Container publishing and operator guide
+├── deploy/                           # Caddy ingress and Redis ACL bootstrap
 ├── INSTALLATION.md                   # GitHub clone-to-running local installation guide
 ├── package.json                      # Root process runner (`npm run live`)
 ├── SWIFT_MOBILE_APP_SPEC.md          # OWNER-only, read-only Swift manager dashboard contract
@@ -28,6 +29,7 @@ order-flow/
     ├── bruno/                        # Native Bruno collection, Local environment and API testing guide
     ├── docs/
     │   ├── api-contract.md           # Planned HTTP route inventory
+    │   ├── security-operations.md    # Credential, migration, backup and rollback runbook
     │   └── openapi.yaml              # Importable Postman/OpenAPI contract for all routes
     ├── apps/
     │   ├── api/                      # HTTP API service
@@ -81,6 +83,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 - The complete application can run from published Docker images through root `compose.yaml`: PostgreSQL, Redis, one-shot OWNER initialization, API, Admin Web, Telegram Bot and notification worker. GHCR release automation builds both AMD64 and ARM64 images.
 - The Admin Web uses a same-origin Next.js BFF with an explicit business-route allowlist, Origin checks for cookie-authenticated mutations, trusted proxy identity headers, bounded upstream timeouts and Redis-coordinated refresh-token single-flight. OWNER pages remain owner-only; SERVICE_STAFF can use only their own order workflow; BARISTA remains Telegram-only.
 - API authentication sessions and distributed request limits share Redis with separate namespaces. Production has no in-memory authentication fallback; Redis failures fail closed with 503. BFF and API require a distinct `API_PROXY_SECRET`, and sensitive/session responses are marked `no-store`.
+- Production Compose exposes only the Caddy HTTPS ingress. API and notification worker use separate non-superuser PostgreSQL roles; API, BFF and BullMQ use separate Redis ACL users. The one-shot initializer applies rerunnable migrations and grants with the administrative database credential.
 - The API is an Express app with Telegram employee-session authentication, order lifecycle, barista, admin, payment, SePay, reconciliation, refund, revenue report, audit and order-status-history modules. Its routes are mounted beneath `/api/v1`.
 - OWNER-authenticated `GET /api/v1/admin/dashboard` returns live PostgreSQL aggregates, status counts, revenue buckets, recent orders and payment alerts for the requested 1–90 day range.
 - The root `npm run live` command uses `concurrently` to run the API, Admin Web, Telegram Bot and notification worker in one terminal.
@@ -100,6 +103,7 @@ All module directories are under `backend/apps/api/src/modules/`:
 
 ## Progress log — 2026-10-14
 
+- Added production least-privilege PostgreSQL roles, Redis ACL bootstrap, Caddy-only ingress, remote database verify-full enforcement, container hardening, dependency/secret/image CI gates, and a disposable backup-restore rehearsal.
 - Hardened the Admin Web permission/session boundary: actor IDs were removed from browser mutations, list consumers now traverse bounded 100-row pages, BFF routes are allowlisted and same-origin protected, and concurrent refreshes are coordinated through short-lived hashed Redis keys.
 - Integrated Redis-backed account/IP/user/export throttles and Helmet into the API application with trusted-proxy handling. Added frontend security unit/integration coverage and production-compatible security headers.
 - Replaced process-local API authentication sessions with Redis TTL records and

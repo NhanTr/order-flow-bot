@@ -33,8 +33,8 @@ runIntegration("Redis BFF refresh single-flight", () => {
 
   afterAll(async () => {
     if (first?.isOpen) {
-      for await (const key of first.scanIterator({ MATCH: "order-flow:bff-refresh:v1:*", COUNT: 100 })) {
-        await first.del(key);
+      for await (const keys of first.scanIterator({ MATCH: "order-flow:bff-refresh:v1:*", COUNT: 100 })) {
+        if (keys.length > 0) await first.del(keys);
       }
     }
     await Promise.allSettled([

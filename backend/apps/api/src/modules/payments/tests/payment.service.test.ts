@@ -29,12 +29,14 @@ vi.mock("@prisma/client", () => ({
   AuditEntityType: {
     PAYMENT: "PAYMENT",
   },
-  PrismaClient: vi.fn(() => ({
+  PrismaClient: vi.fn(function PrismaClientMock() {
+    return {
     $transaction: vi.fn((callback) => callback(tx)),
     order: {
       findUnique: vi.fn(),
     },
-  })),
+    };
+  }),
 }));
 
 describe("PaymentService financial audit", () => {

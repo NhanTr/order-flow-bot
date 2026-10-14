@@ -19,4 +19,6 @@ coverage/
 # Local database exports can contain production data and password hashes.
 /backend/backup.sql
 
-backend/docs/
+backend/docs/*
+!backend/docs/security-advisory-waivers.json
+!backend/docs/security-operations.md

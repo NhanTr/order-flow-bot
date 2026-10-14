@@ -8,10 +8,10 @@
     "build": "tsc -p tsconfig.json",
     "check:auth": "tsc -p tsconfig.auth.json",
     "start": "node dist/src/server.js",
-    "test:auth": "vitest run --config vitest.config.ts",
-    "test": "vitest run --config vitest.config.ts",
-    "test:auth:integration": "vitest run --config vitest.integration.config.ts",
-    "test:security:integration": "vitest run --config vitest.security-integration.config.ts",
+    "test:auth": "vitest run --config vitest.config.mts",
+    "test": "vitest run --config vitest.config.mts",
+    "test:auth:integration": "vitest run --config vitest.integration.config.mts",
+    "test:security:integration": "vitest run --config vitest.security-integration.config.mts",
     "test:node": "node --import tsx --test test/auth-session.store.test.ts test/auth.routes.test.ts test/auth.service.test.ts test/database.test.ts test/employees.routes.test.ts test/menu-categories.routes.test.ts test/menu-items.routes.test.ts test/shared-middleware.test.ts test/telegram-init-data.test.ts"
   },
   "dependencies": {
@@ -38,8 +38,8 @@
     "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "tsx": "4.19.2",
+    "tsx": "^4.23.15",
     "typescript": "5.7.2",
-    "vitest": "3.0.5"
+    "vitest": "^4.1.11"
   }
 }

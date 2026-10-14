@@ -54,7 +54,7 @@ runIntegration("Redis rate-limit security integration", () => {
   });
 
   it("atomically shares the login IP counter between API instances", async () => {
-    const prefix = `order-flow:test:${crypto.randomUUID()}`;
+    const prefix = `order-flow:security:v1:test:${crypto.randomUUID()}`;
     const firstApp = appFor(firstRedis!, prefix);
     const secondApp = appFor(secondRedis!, prefix);
     const responses = await Promise.all(Array.from({ length: 100 }, (_, index) =>

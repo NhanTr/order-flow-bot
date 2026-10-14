@@ -1,0 +1,11 @@
+{
+  "waivers": [
+    {
+      "packages": ["prisma", "@prisma/config", "deepmerge-ts"],
+      "advisory": "GHSA-ggr8-5vv4-36mx",
+      "owner": "Order Flow maintainers",
+      "expires": "2027-01-31",
+      "reason": "Prisma CLI configuration is build/migration tooling and never merges request data in a runtime service. Reassess on the next compatible Prisma release."
+    }
+  ]
+}

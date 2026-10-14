@@ -11,7 +11,9 @@ vi.mock("@prisma/client", () => {
   };
 
   return {
-    PrismaClient: vi.fn().mockImplementation(() => prisma),
+    PrismaClient: vi.fn().mockImplementation(function PrismaClientMock() {
+      return prisma;
+    }),
   };
 });
 
